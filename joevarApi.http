@@ -1,0 +1,13 @@
+@joevarApi_HostAddress = http://localhost:5282
+
+GET {{joevarApi_HostAddress}}/health
+Accept: application/json
+
+###
+
+POST {{joevarApi_HostAddress}}/api/sms/opt-in
+Content-Type: application/json
+
+{
+	"phoneNumber": "+15551234567"
+}

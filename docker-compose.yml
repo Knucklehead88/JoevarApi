@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    ports:
+      - "10000:10000"
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 10000

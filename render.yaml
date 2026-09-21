@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: joevar-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: Twilio__AccountSid
+        sync: false
+      - key: Twilio__AuthToken
+        sync: false
+      - key: Twilio__FromPhoneNumber
+        sync: false
+      - key: Twilio__OptInMessage
+        value: You are opted in to receive SMS messages. Reply STOP to unsubscribe.
