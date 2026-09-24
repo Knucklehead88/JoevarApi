@@ -54,7 +54,16 @@ public static class SmsOptInEndpoints
         }
         catch (ApiException exception)
         {
-            logger.LogError(exception, "Twilio rejected the opt-in SMS request.");
+            var phoneSuffix = request.PhoneNumber.Length > 4
+                ? request.PhoneNumber[^4..]
+                : request.PhoneNumber;
+            logger.LogError(
+                exception,
+                "Twilio rejected the opt-in SMS request. StatusCode={StatusCode}, ErrorCode={ErrorCode}, MoreInfo={MoreInfo}, RecipientLastFour={RecipientLastFour}",
+                exception.Status,
+                exception.Code,
+                exception.MoreInfo,
+                phoneSuffix);
             return TypedResults.Problem(
                 statusCode: StatusCodes.Status502BadGateway,
                 title: "The SMS provider could not send the message.");
