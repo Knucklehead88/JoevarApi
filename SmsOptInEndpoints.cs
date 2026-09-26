@@ -92,5 +92,9 @@ public sealed class TwilioOptions
 
     public string? FromPhoneNumber { get; init; }
 
+    public string? ForwardToPhoneNumber { get; init; }
+
+    public string? InboundWebhookUrl { get; init; }
+
     public string OptInMessage { get; init; } = "You are opted in to receive SMS messages. Reply STOP to unsubscribe.";
 }

@@ -12,5 +12,13 @@ services:
         sync: false
       - key: Twilio__FromPhoneNumber
         sync: false
+      - key: Twilio__ForwardToPhoneNumber
+        sync: false
+      - key: Twilio__InboundWebhookUrl
+        sync: false
       - key: Twilio__OptInMessage
         value: You are opted in to receive SMS messages. Reply STOP to unsubscribe.
+      - key: Monday__ApiToken
+        sync: false
+      - key: Monday__BoardId
+        sync: false

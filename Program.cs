@@ -7,6 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddValidation();
 builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(TwilioOptions.SectionName));
+builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
+builder.Services.AddHttpClient();
 
 builder.Services.AddCors(options =>
 {
@@ -34,6 +36,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("Shopify");
 app.MapSmsOptInEndpoints();
+app.MapSmsInboundEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
     .WithName("HealthCheck");
