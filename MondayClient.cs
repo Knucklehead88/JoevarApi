@@ -119,7 +119,8 @@ public sealed class MondayClient(
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                logger.LogError(exception, "Failed to register the Monday.com webhook on board {BoardId}.", boardId);
+                // Usually a permission problem (USER_UNAUTHORIZED); one line per board is enough, no stack trace.
+                logger.LogWarning("Could not register the Monday.com webhook on board {BoardId}: {Error}", boardId, exception.Message);
             }
         }
     }
