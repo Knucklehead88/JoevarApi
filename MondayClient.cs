@@ -207,6 +207,8 @@ public sealed class MondayClient(
         const int pageSize = 100;
         const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id name } }";
 
+        // An empty suffix would match every board, so fall back to the default naming.
+        var suffix = string.IsNullOrWhiteSpace(settings.CustomerBoardSuffix) ? "- Customer" : settings.CustomerBoardSuffix.Trim();
         var customerBoards = new List<(string Id, string CustomerName)>();
         for (var page = 1; ; page++)
         {
@@ -215,9 +217,9 @@ public sealed class MondayClient(
             foreach (var board in boards.EnumerateArray())
             {
                 var name = board.GetProperty("name").GetString()?.Trim() ?? string.Empty;
-                if (name.EndsWith(settings.CustomerBoardSuffix, StringComparison.OrdinalIgnoreCase))
+                if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                 {
-                    customerBoards.Add((board.GetProperty("id").GetString()!, name[..^settings.CustomerBoardSuffix.Length].Trim()));
+                    customerBoards.Add((board.GetProperty("id").GetString()!, name[..^suffix.Length].Trim()));
                 }
             }
 
