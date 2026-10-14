@@ -205,7 +205,7 @@ public sealed class MondayClient(
     private async Task<IReadOnlyList<CustomerBoard>> LoadCustomersAsync(CancellationToken cancellationToken)
     {
         const int pageSize = 100;
-        const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id name } }";
+        const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id name type } }";
 
         // An empty suffix would match every board, so fall back to the default naming.
         var suffix = string.IsNullOrWhiteSpace(settings.CustomerBoardSuffix) ? "- Customer" : settings.CustomerBoardSuffix.Trim();
@@ -216,10 +216,14 @@ public sealed class MondayClient(
             var boards = data.GetProperty("boards");
             foreach (var board in boards.EnumerateArray())
             {
+                // Skip subitem boards ("Subitems of X- Customer") and the inbox, which may follow the same naming.
+                var id = board.GetProperty("id").GetString()!;
                 var name = board.GetProperty("name").GetString()?.Trim() ?? string.Empty;
-                if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                if (board.GetProperty("type").GetString() == "board" &&
+                    id != settings.BoardId &&
+                    name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                 {
-                    customerBoards.Add((board.GetProperty("id").GetString()!, name[..^suffix.Length].Trim()));
+                    customerBoards.Add((id, name[..^suffix.Length].Trim()));
                 }
             }
 
@@ -233,7 +237,7 @@ public sealed class MondayClient(
             query ($boardIds: [ID!]) {
               boards(ids: $boardIds) {
                 id
-                items_page(limit: 25) { items { id column_values(types: [phone]) { text } } }
+                items_page(limit: 25) { items { id column_values { type text column { title } } } }
               }
             }
             """;
@@ -247,6 +251,7 @@ public sealed class MondayClient(
                 var boardId = board.GetProperty("id").GetString()!;
                 var match = board.GetProperty("items_page").GetProperty("items").EnumerateArray()
                     .SelectMany(item => item.GetProperty("column_values").EnumerateArray()
+                        .Where(IsPhoneColumn)
                         .Select(column => (ItemId: item.GetProperty("id").GetString()!, Phone: NormalizePhoneNumber(column.GetProperty("text").GetString()))))
                     .FirstOrDefault(entry => entry.Phone is not null);
 
@@ -262,6 +267,14 @@ public sealed class MondayClient(
 
         return customers;
     }
+
+    // A monday Phone column, or any column titled "Phone" (customer boards use a Text column).
+    private static bool IsPhoneColumn(JsonElement columnValue) =>
+        columnValue.GetProperty("type").GetString() == "phone" ||
+        string.Equals(
+            columnValue.GetProperty("column").GetProperty("title").GetString()?.Trim(),
+            "Phone",
+            StringComparison.OrdinalIgnoreCase);
 
     private async Task<string?> FindItemIdAsync(
         string boardId,
