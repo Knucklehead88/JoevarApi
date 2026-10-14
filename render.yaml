@@ -22,3 +22,15 @@ services:
         sync: false
       - key: Monday__BoardId
         sync: false
+      - key: Monday__PhoneColumnId
+        sync: false
+      - key: Monday__CustomerBoardSuffix
+        value: "- Customer"
+      - key: Monday__TicketsBoardId
+        sync: false
+      - key: Monday__WebhookUrl
+        sync: false
+      - key: Monday__WebhookSecret
+        sync: false
+      - key: Monday__ReplyPrefix
+        value: /sms

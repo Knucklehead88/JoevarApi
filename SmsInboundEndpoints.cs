@@ -1,6 +1,4 @@
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Twilio;
@@ -10,11 +8,13 @@ using Twilio.Types;
 
 public static class SmsInboundEndpoints
 {
+    private const string EmptyTwiml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response />";
+
     public static IEndpointRouteBuilder MapSmsInboundEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/api/sms/inbound", ReceiveSmsAsync)
             .WithName("ReceiveInboundSms")
-            .WithSummary("Receive and forward an inbound SMS")
+            .WithSummary("Log an inbound SMS to monday.com")
             .Accepts<IFormCollection>("application/x-www-form-urlencoded")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
@@ -27,8 +27,7 @@ public static class SmsInboundEndpoints
     private static async Task<IResult> ReceiveSmsAsync(
         HttpRequest request,
         IOptions<TwilioOptions> twilioOptions,
-        IOptions<MondayOptions> mondayOptions,
-        IHttpClientFactory httpClientFactory,
+        MondayClient monday,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -38,24 +37,12 @@ public static class SmsInboundEndpoints
             string.IsNullOrWhiteSpace(twilio.AuthToken) ||
             string.IsNullOrWhiteSpace(twilio.InboundWebhookUrl) ||
             string.IsNullOrWhiteSpace(twilio.FromPhoneNumber) ||
-            string.IsNullOrWhiteSpace(twilio.ForwardToPhoneNumber))
+            !monday.IsConfigured)
         {
-            logger.LogError("Inbound Twilio SMS settings are not fully configured.");
+            logger.LogError("Inbound SMS settings (Twilio or Monday.com) are not fully configured.");
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
-                title: "Inbound SMS forwarding is not configured.");
-        }
-
-        var monday = mondayOptions.Value;
-        var mondayConfigured = !string.IsNullOrWhiteSpace(monday.ApiToken) &&
-            !string.IsNullOrWhiteSpace(monday.BoardId);
-        if (!mondayConfigured &&
-            (!string.IsNullOrWhiteSpace(monday.ApiToken) || !string.IsNullOrWhiteSpace(monday.BoardId)))
-        {
-            logger.LogError("Monday.com integration requires both an API token and board ID.");
-            return Results.Problem(
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                title: "Monday.com integration is not fully configured.");
+                title: "Inbound SMS logging is not configured.");
         }
 
         if (!request.HasFormContentType)
@@ -84,70 +71,52 @@ public static class SmsInboundEndpoints
             return Results.BadRequest();
         }
 
+        // Replies to forwarded notifications come back to the Twilio number; they are not customer messages.
+        if (string.Equals(sender, twilio.ForwardToPhoneNumber, StringComparison.Ordinal))
+        {
+            logger.LogInformation("Ignored SMS {MessageSid} from the forwarding number; replies must be sent from monday.com.", messageSid);
+            return Results.Content(EmptyTwiml, "application/xml");
+        }
+
+        var logText = new StringBuilder($"⬅ Customer:{Environment.NewLine}{body}");
+        if (int.TryParse(form["NumMedia"], out var mediaCount))
+        {
+            for (var index = 0; index < mediaCount; index++)
+            {
+                logText.Append($"{Environment.NewLine}📎 {form[$"MediaUrl{index}"]}");
+            }
+        }
+
         try
         {
-            TwilioClient.Init(twilio.AccountSid, twilio.AuthToken);
-            await MessageResource.CreateAsync(
-                body: $"SMS from {sender}: {body}",
-                from: new PhoneNumber(twilio.FromPhoneNumber),
-                to: new PhoneNumber(twilio.ForwardToPhoneNumber));
-
-            if (mondayConfigured)
-            {
-                await CreateMondayItemAsync(httpClientFactory, monday, sender, body, cancellationToken);
-            }
-
-            logger.LogInformation("Processed inbound SMS {MessageSid}.", messageSid);
-            return Results.Content("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response />", "application/xml");
+            var conversation = await monday.GetOrCreateConversationAsync(sender, cancellationToken);
+            await monday.CreateUpdateAsync(conversation.ItemId, logText.ToString(), null, cancellationToken);
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Failed to process inbound SMS {MessageSid}.", messageSid);
+            logger.LogError(exception, "Failed to log inbound SMS {MessageSid} to Monday.com.", messageSid);
             return Results.Problem(
                 statusCode: StatusCodes.Status502BadGateway,
-                title: "The inbound SMS could not be forwarded.");
+                title: "The inbound SMS could not be logged.");
         }
-    }
 
-    private static async Task CreateMondayItemAsync(
-        IHttpClientFactory httpClientFactory,
-        MondayOptions settings,
-        string sender,
-        string body,
-        CancellationToken cancellationToken)
-    {
-        const string query = "mutation ($boardId: ID!, $itemName: String!) { create_item(board_id: $boardId, item_name: $itemName) { id } }";
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.monday.com/v2")
+        if (!string.IsNullOrWhiteSpace(twilio.ForwardToPhoneNumber))
         {
-            Content = JsonContent.Create(new
+            try
             {
-                query,
-                variables = new
-                {
-                    boardId = settings.BoardId,
-                    itemName = $"SMS from {sender}: {body}"
-                }
-            })
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiToken);
-
-        using var response = await httpClientFactory.CreateClient().SendAsync(request, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        using var document = JsonDocument.Parse(responseBody);
-        if (document.RootElement.TryGetProperty("errors", out var errors) && errors.GetArrayLength() > 0)
-        {
-            throw new HttpRequestException("Monday.com returned a GraphQL error while creating the SMS item.");
+                TwilioClient.Init(twilio.AccountSid, twilio.AuthToken);
+                await MessageResource.CreateAsync(
+                    body: $"SMS from {sender}: {body}\n(Reply on monday.com)",
+                    from: new PhoneNumber(twilio.FromPhoneNumber),
+                    to: new PhoneNumber(twilio.ForwardToPhoneNumber));
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Failed to forward notification for inbound SMS {MessageSid}.", messageSid);
+            }
         }
+
+        logger.LogInformation("Processed inbound SMS {MessageSid}.", messageSid);
+        return Results.Content(EmptyTwiml, "application/xml");
     }
-}
-
-public sealed class MondayOptions
-{
-    public const string SectionName = "Monday";
-
-    public string? ApiToken { get; init; }
-
-    public string? BoardId { get; init; }
 }

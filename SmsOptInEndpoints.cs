@@ -25,6 +25,7 @@ public static class SmsOptInEndpoints
     private static async Task<Results<Ok<SmsOptInResponse>, ProblemHttpResult>> SendOptInMessageAsync(
         SmsOptInRequest request,
         IOptions<TwilioOptions> twilioOptions,
+        MondayClient monday,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -48,6 +49,23 @@ public static class SmsOptInEndpoints
                 body: settings.OptInMessage,
                 from: new PhoneNumber(settings.FromPhoneNumber),
                 to: new PhoneNumber(request.PhoneNumber));
+
+            if (monday.IsConfigured)
+            {
+                try
+                {
+                    var conversation = await monday.GetOrCreateConversationAsync(request.PhoneNumber, cancellationToken);
+                    await monday.CreateUpdateAsync(
+                        conversation.ItemId,
+                        $"➡ Opt-in confirmation sent:{Environment.NewLine}{settings.OptInMessage}",
+                        null,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    logger.LogWarning(exception, "Failed to log opt-in SMS {MessageSid} to Monday.com.", message.Sid);
+                }
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
             return TypedResults.Ok(new SmsOptInResponse(message.Sid));

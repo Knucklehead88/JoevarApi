@@ -8,7 +8,9 @@ builder.Services.AddOpenApi();
 builder.Services.AddValidation();
 builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(TwilioOptions.SectionName));
 builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
-builder.Services.AddHttpClient();
+builder.Services.AddSingleton<MondayCustomerCache>();
+builder.Services.AddHttpClient<MondayClient>();
+builder.Services.AddHostedService<MondayRefreshService>();
 
 builder.Services.AddCors(options =>
 {
@@ -37,6 +39,7 @@ app.UseHttpsRedirection();
 app.UseCors("Shopify");
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
+app.MapMondayWebhookEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
     .WithName("HealthCheck");
