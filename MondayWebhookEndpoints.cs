@@ -138,8 +138,6 @@ public static class MondayWebhookEndpoints
                         from: new PhoneNumber(twilio.FromPhoneNumber),
                         to: new PhoneNumber(phoneNumber));
 
-                    await monday.CreateUpdateAsync(itemId, $"➡ Sent to {phoneNumber} ({sent.Sid})", updateId, cancellationToken);
-
                     // Replies posted on other items of the board are copied into the customer's thread.
                     if (conversation.ItemId != itemId)
                     {
