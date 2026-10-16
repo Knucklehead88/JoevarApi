@@ -54,12 +54,15 @@ public static class SmsOptInEndpoints
             {
                 try
                 {
-                    var conversation = await monday.GetOrCreateConversationAsync(request.PhoneNumber, cancellationToken);
-                    await monday.CreateUpdateAsync(
-                        conversation.ItemId,
-                        $"➡ Opt-in confirmation sent:{Environment.NewLine}{settings.OptInMessage}",
-                        null,
-                        cancellationToken);
+                    var customer = await monday.FindCustomerByPhoneAsync(request.PhoneNumber, cancellationToken);
+                    if (customer is not null)
+                    {
+                        await monday.CreateUpdateAsync(
+                            customer.ItemId,
+                            $"➡ Opt-in confirmation sent:{Environment.NewLine}{settings.OptInMessage}",
+                            null,
+                            cancellationToken);
+                    }
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {

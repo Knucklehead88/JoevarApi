@@ -78,7 +78,7 @@ public static class SmsInboundEndpoints
             return Results.Content(EmptyTwiml, "application/xml");
         }
 
-        var logText = new StringBuilder($"⬅ Customer:{Environment.NewLine}{body}");
+        var logText = new StringBuilder(body);
         if (int.TryParse(form["NumMedia"], out var mediaCount))
         {
             for (var index = 0; index < mediaCount; index++)
@@ -89,8 +89,15 @@ public static class SmsInboundEndpoints
 
         try
         {
-            var conversation = await monday.GetOrCreateConversationAsync(sender, cancellationToken);
-            await monday.CreateUpdateAsync(conversation.ItemId, logText.ToString(), null, cancellationToken);
+            var customer = await monday.FindCustomerByPhoneAsync(sender, cancellationToken);
+            if (customer is null)
+            {
+                logger.LogWarning("Inbound SMS {MessageSid} is from a number that is not on any customer board.", messageSid);
+            }
+            else
+            {
+                await monday.CreateUpdateAsync(customer.ItemId, logText.ToString(), null, cancellationToken, customer.CustomerName);
+            }
         }
         catch (Exception exception)
         {

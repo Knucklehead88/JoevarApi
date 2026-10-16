@@ -117,12 +117,12 @@ public static class MondayWebhookEndpoints
             // Always answer 200 from here on: monday.com retries failed webhooks, which would resend the SMS.
             try
             {
-                var conversation = await monday.FindConversationForItemAsync(boardId, itemId, cancellationToken);
+                var conversation = await monday.FindCustomerByBoardAsync(boardId, cancellationToken);
                 if (conversation is null)
                 {
                     await monday.CreateUpdateAsync(
                         itemId,
-                        "❌ Not sent: no customer board with a phone number matches this item.",
+                        "❌ Not sent: this board has no customer phone number.",
                         updateId,
                         cancellationToken);
                     return Results.Ok();
@@ -140,7 +140,7 @@ public static class MondayWebhookEndpoints
 
                     await monday.CreateUpdateAsync(itemId, $"➡ Sent to {phoneNumber} ({sent.Sid})", updateId, cancellationToken);
 
-                    // Replies posted on tickets or other items are copied into the customer's thread.
+                    // Replies posted on other items of the board are copied into the customer's thread.
                     if (conversation.ItemId != itemId)
                     {
                         await monday.CreateUpdateAsync(
