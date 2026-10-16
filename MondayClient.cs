@@ -36,8 +36,8 @@ public sealed class MondayClient(
     // A forced refresh (unknown phone or board) is skipped if the cache is younger than this, so spam can't hammer monday.
     private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(30);
 
-    // "Norman Winkfield- Customer" -> "Norman Winkfield"
-    private static readonly Regex CustomerSuffixRegex = new(@"\s*-?\s*Customer\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // "Norman Winkfield- Customer" / "Norman Winkfield — Customer" / "Norman Winkfield —" -> "Norman Winkfield"
+    private static readonly Regex CustomerSuffixRegex = new(@"[\s\-–—]*(Customer)?[\s\-–—]*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly MondayOptions settings = options.Value;
 

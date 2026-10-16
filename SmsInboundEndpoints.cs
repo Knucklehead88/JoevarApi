@@ -71,13 +71,6 @@ public static class SmsInboundEndpoints
             return Results.BadRequest();
         }
 
-        // Replies to forwarded notifications come back to the Twilio number; they are not customer messages.
-        if (string.Equals(sender, twilio.ForwardToPhoneNumber, StringComparison.Ordinal))
-        {
-            logger.LogInformation("Ignored SMS {MessageSid} from the forwarding number; replies must be sent from monday.com.", messageSid);
-            return Results.Content(EmptyTwiml, "application/xml");
-        }
-
         var logText = new StringBuilder(body);
         if (int.TryParse(form["NumMedia"], out var mediaCount))
         {
@@ -87,16 +80,23 @@ public static class SmsInboundEndpoints
             }
         }
 
+        var fromForwardingNumber = string.Equals(sender, twilio.ForwardToPhoneNumber, StringComparison.Ordinal);
         try
         {
             var customer = await monday.FindCustomerByPhoneAsync(sender, cancellationToken);
-            if (customer is null)
+            if (customer is not null)
             {
-                logger.LogWarning("Inbound SMS {MessageSid} is from a number that is not on any customer board.", messageSid);
+                await monday.CreateUpdateAsync(customer.ItemId, logText.ToString(), null, cancellationToken, customer.CustomerName);
+            }
+            else if (fromForwardingNumber)
+            {
+                // Replies to forwarded notifications come back to the Twilio number; they are not customer messages.
+                logger.LogInformation("Ignored SMS {MessageSid} from the forwarding number; replies must be sent from monday.com.", messageSid);
+                return Results.Content(EmptyTwiml, "application/xml");
             }
             else
             {
-                await monday.CreateUpdateAsync(customer.ItemId, logText.ToString(), null, cancellationToken, customer.CustomerName);
+                logger.LogWarning("Inbound SMS {MessageSid} is from a number that is not on any customer board.", messageSid);
             }
         }
         catch (Exception exception)
@@ -107,7 +107,8 @@ public static class SmsInboundEndpoints
                 title: "The inbound SMS could not be logged.");
         }
 
-        if (!string.IsNullOrWhiteSpace(twilio.ForwardToPhoneNumber))
+        // No point notifying the forwarding phone about a text it sent itself.
+        if (!string.IsNullOrWhiteSpace(twilio.ForwardToPhoneNumber) && !fromForwardingNumber)
         {
             try
             {
