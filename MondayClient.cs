@@ -49,14 +49,43 @@ public sealed class MondayClient(
     public async Task<CustomerBoard?> FindCustomerByPhoneAsync(string phoneNumber, CancellationToken cancellationToken)
     {
         var normalizedPhone = NormalizePhoneNumber(phoneNumber);
-        return normalizedPhone is null
-            ? null
-            : await FindCustomerAsync(customer => customer.PhoneNumber == normalizedPhone, cancellationToken);
+        if (normalizedPhone is null)
+        {
+            return null;
+        }
+
+        var cached = await FindCustomerAsync(customer => customer.PhoneNumber == normalizedPhone, cancellationToken);
+        if (cached is null)
+        {
+            return null;
+        }
+
+        // Confirm against the live board, in case the number was changed since the cache was loaded.
+        var current = await FindCustomerByBoardAsync(cached.BoardId, cancellationToken);
+        return current?.PhoneNumber == normalizedPhone ? current : null;
     }
 
-    /// <summary>Finds the customer board an update was posted on.</summary>
-    public Task<CustomerBoard?> FindCustomerByBoardAsync(string boardId, CancellationToken cancellationToken) =>
-        FindCustomerAsync(customer => customer.BoardId == boardId, cancellationToken);
+    /// <summary>
+    /// Finds the customer board an update was posted on. The phone is read live, not from the cache,
+    /// so a number changed in the Phone column is used right away.
+    /// </summary>
+    public async Task<CustomerBoard?> FindCustomerByBoardAsync(string boardId, CancellationToken cancellationToken)
+    {
+        var allowedBoardIds = AllowedBoardIds;
+        if (allowedBoardIds.Count > 0 && !allowedBoardIds.Contains(boardId))
+        {
+            return null;
+        }
+
+        var customer = (await LoadBoardsAsync([boardId], cancellationToken)).FirstOrDefault();
+
+        // Keep the cache in step, so inbound texts from the new number match and the old number no longer does.
+        cache.Customers = cache.Customers
+            .Where(cached => cached.BoardId != boardId)
+            .Concat(customer is null ? [] : [customer])
+            .ToList();
+        return customer;
+    }
 
     /// <summary>Reloads the customer boards and registers the reply webhook on each of them.</summary>
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -159,16 +188,19 @@ public sealed class MondayClient(
         }
     }
 
+    private HashSet<string> AllowedBoardIds =>
+        (settings.BoardIds ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet();
+
     private async Task<IReadOnlyList<CustomerBoard>> LoadCustomersAsync(CancellationToken cancellationToken)
     {
         const int pageSize = 100;
-        const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id name type } }";
+        const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id type } }";
 
         // When BoardIds is set, only those boards are used (e.g. a test board); otherwise every board is scanned.
-        var allowedBoardIds = (settings.BoardIds ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToHashSet();
-        var boardNames = new Dictionary<string, string>();
+        var allowedBoardIds = AllowedBoardIds;
+        var boardIds = new List<string>();
         for (var page = 1; ; page++)
         {
             var data = await ExecuteAsync(boardsQuery, new { page }, cancellationToken);
@@ -176,10 +208,11 @@ public sealed class MondayClient(
             foreach (var board in boards.EnumerateArray())
             {
                 // Skip subitem boards and docs; they never hold the customer's phone.
+                var boardId = board.GetProperty("id").GetString()!;
                 if (board.GetProperty("type").GetString() == "board" &&
-                    (allowedBoardIds.Count == 0 || allowedBoardIds.Contains(board.GetProperty("id").GetString()!)))
+                    (allowedBoardIds.Count == 0 || allowedBoardIds.Contains(boardId)))
                 {
-                    boardNames[board.GetProperty("id").GetString()!] = board.GetProperty("name").GetString()?.Trim() ?? string.Empty;
+                    boardIds.Add(boardId);
                 }
             }
 
@@ -189,35 +222,45 @@ public sealed class MondayClient(
             }
         }
 
+        var customers = new List<CustomerBoard>();
+        foreach (var batch in boardIds.Chunk(10))
+        {
+            customers.AddRange(await LoadBoardsAsync(batch, cancellationToken));
+        }
+
+        return customers;
+    }
+
+    /// <summary>Reads the current phone number and name of the given boards; boards without a phone are left out.</summary>
+    private async Task<IReadOnlyList<CustomerBoard>> LoadBoardsAsync(IReadOnlyList<string> boardIds, CancellationToken cancellationToken)
+    {
         // Boards duplicated from the same template keep the same column IDs, so one Phone column ID covers all customers.
-        const string phonesQuery = """
+        const string query = """
             query ($boardIds: [ID!], $columnIds: [String!]) {
               boards(ids: $boardIds) {
                 id
+                name
                 items_page(limit: 25) { items { id column_values(ids: $columnIds) { text } } }
               }
             }
             """;
-        var customers = new List<CustomerBoard>();
-        foreach (var batch in boardNames.Keys.Chunk(10))
-        {
-            var data = await ExecuteAsync(
-                phonesQuery,
-                new { boardIds = batch, columnIds = new[] { settings.PhoneColumnId } },
-                cancellationToken);
-            foreach (var board in data.GetProperty("boards").EnumerateArray())
-            {
-                var boardId = board.GetProperty("id").GetString()!;
-                var match = board.GetProperty("items_page").GetProperty("items").EnumerateArray()
-                    .SelectMany(item => item.GetProperty("column_values").EnumerateArray()
-                        .Select(column => (ItemId: item.GetProperty("id").GetString()!, Phone: NormalizePhoneNumber(column.GetProperty("text").GetString()))))
-                    .FirstOrDefault(entry => entry.Phone is not null);
+        var data = await ExecuteAsync(
+            query,
+            new { boardIds, columnIds = new[] { settings.PhoneColumnId } },
+            cancellationToken);
 
-                if (match.Phone is not null)
-                {
-                    var customerName = CustomerSuffixRegex.Replace(boardNames[boardId], string.Empty);
-                    customers.Add(new CustomerBoard(boardId, customerName, match.ItemId, match.Phone));
-                }
+        var customers = new List<CustomerBoard>();
+        foreach (var board in data.GetProperty("boards").EnumerateArray())
+        {
+            var match = board.GetProperty("items_page").GetProperty("items").EnumerateArray()
+                .SelectMany(item => item.GetProperty("column_values").EnumerateArray()
+                    .Select(column => (ItemId: item.GetProperty("id").GetString()!, Phone: NormalizePhoneNumber(column.GetProperty("text").GetString()))))
+                .FirstOrDefault(entry => entry.Phone is not null);
+
+            if (match.Phone is not null)
+            {
+                var customerName = CustomerSuffixRegex.Replace(board.GetProperty("name").GetString()?.Trim() ?? string.Empty, string.Empty);
+                customers.Add(new CustomerBoard(board.GetProperty("id").GetString()!, customerName, match.ItemId, match.Phone));
             }
         }
 
