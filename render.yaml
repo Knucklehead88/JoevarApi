@@ -22,6 +22,8 @@ services:
         sync: false
       - key: Monday__PhoneColumnId
         sync: false
+      - key: Monday__BoardIds
+        sync: false
       - key: Monday__WebhookUrl
         sync: false
       - key: Monday__WebhookSecret

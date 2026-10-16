@@ -164,6 +164,10 @@ public sealed class MondayClient(
         const int pageSize = 100;
         const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id name type } }";
 
+        // When BoardIds is set, only those boards are used (e.g. a test board); otherwise every board is scanned.
+        var allowedBoardIds = (settings.BoardIds ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet();
         var boardNames = new Dictionary<string, string>();
         for (var page = 1; ; page++)
         {
@@ -172,7 +176,8 @@ public sealed class MondayClient(
             foreach (var board in boards.EnumerateArray())
             {
                 // Skip subitem boards and docs; they never hold the customer's phone.
-                if (board.GetProperty("type").GetString() == "board")
+                if (board.GetProperty("type").GetString() == "board" &&
+                    (allowedBoardIds.Count == 0 || allowedBoardIds.Contains(board.GetProperty("id").GetString()!)))
                 {
                     boardNames[board.GetProperty("id").GetString()!] = board.GetProperty("name").GetString()?.Trim() ?? string.Empty;
                 }
@@ -306,6 +311,9 @@ public sealed class MondayOptions
 
     /// <summary>ID of the column holding the customer's phone number; the same on every customer board.</summary>
     public string? PhoneColumnId { get; init; }
+
+    /// <summary>Optional comma-separated board IDs to limit SMS logging to; empty means every board with a phone.</summary>
+    public string? BoardIds { get; init; }
 
     /// <summary>Public URL of /api/monday/webhook, used to register webhooks on boards.</summary>
     public string? WebhookUrl { get; init; }
