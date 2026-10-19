@@ -1,4 +1,19 @@
 services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: joevar
+      POSTGRES_USER: joevar
+      POSTGRES_PASSWORD: joevar_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U joevar -d joevar"]
+      interval: 5s
+      retries: 10
+
   api:
     build: .
     ports:
@@ -8,3 +23,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 10000
+      ConnectionStrings__Default: Host=db;Port=5432;Database=joevar;Username=joevar;Password=joevar_dev
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,15 +13,23 @@ builder.Services.AddSingleton<MondayCustomerCache>();
 builder.Services.AddHttpClient<MondayClient>();
 builder.Services.AddHostedService<MondayRefreshService>();
 
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+// Bearer-token login endpoints for the Vue frontend (register, login, refresh, ...).
+builder.Services.AddAuthorization();
+builder.Services.AddIdentityApiEndpoints<AppUser>()
+    .AddRoles<Microsoft.AspNetCore.Identity.IdentityRole>()
+    .AddEntityFrameworkStores<AppDbContext>();
+
+// The Vue frontend and the Shopify storefront (SMS opt-in form) call this API from the browser.
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("Shopify", policy =>
+    options.AddPolicy("Frontend", policy =>
     {
         policy
-            .WithOrigins("*")
-            //     "https://joevar.com",
-            //     "https://www.joevar.com"
-            // )
+            .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -36,7 +45,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseCors("Shopify");
+app.UseCors("Frontend");
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapGroup("/api/auth").WithTags("Auth").MapIdentityApi<AppUser>();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
 app.MapMondayWebhookEndpoints();
