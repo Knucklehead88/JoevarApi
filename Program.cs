@@ -90,6 +90,7 @@ app.MapPhoneLoginEndpoints();
 app.MapPasskeyEndpoints();
 app.MapAppleLoginEndpoints();
 app.MapAuthenticatorEndpoints();
+app.MapCurrentUserEndpoints();
 app.MapCustomerEndpoints();
 app.MapProjectEndpoints();
 app.MapContractorEndpoints();
