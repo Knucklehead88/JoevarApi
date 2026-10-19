@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,7 @@ public static class AppleLoginEndpoints
 
         group.MapPost("/", LoginAsync)
             .RequireRateLimiting(AuthRateLimits.Policy)
+            .Produces<AccessTokenResponse>()
             .WithName("AppleLogin")
             .WithSummary("Exchange an Apple identity token for a bearer token");
         group.MapPost("/link", LinkAsync)

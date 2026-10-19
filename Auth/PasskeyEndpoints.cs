@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 
@@ -28,6 +29,7 @@ public static class PasskeyEndpoints
             .WithSummary("Get options for navigator.credentials.get()");
         group.MapPost("/login", LoginAsync)
             .RequireRateLimiting(AuthRateLimits.Policy)
+            .Produces<AccessTokenResponse>()
             .WithName("PasskeyLogin")
             .WithSummary("Exchange a passkey assertion for a bearer token");
 

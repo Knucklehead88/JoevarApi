@@ -70,7 +70,9 @@ and passkey domain (`localhost`). Real secrets come from environment variables (
 - **Staff** (roles Admin, Manager, VA): username + password via Identity's `/api/auth/login`, plus an
   authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
   `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh.
-- **Customers/contractors**: phone code via Twilio Verify (`/api/auth/phone/*`). Their login is created on
+- **Customers/contractors**: code texted to the phone on file via Twilio Verify, identified by phone
+  (`/api/auth/phone/*`) or by customer/contractor email (`/api/auth/email/*`; an email that maps to more
+  than one phone number is refused). Neither reveals whether an account exists. Their login is created on
   first use, with `UserName` = E.164 phone, and linked to the matching customer/contractor. They can also
   use passkeys (`/api/auth/passkey/*`; the challenge is in a cookie, so CORS allows credentials) and Sign in
   with Apple (`/api/auth/apple`, linked once after a phone login).
