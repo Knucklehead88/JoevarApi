@@ -43,6 +43,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             contractor.Property(c => c.Name).HasMaxLength(200);
             contractor.Property(c => c.CompanyName).HasMaxLength(200);
             contractor.Property(c => c.Email).HasMaxLength(320);
+            contractor.PrimitiveCollection(c => c.Trades).ElementType().HasConversion<string>();
         });
 
         builder.Entity<ContactPhone>(phone =>

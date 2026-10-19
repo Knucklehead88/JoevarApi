@@ -8,8 +8,8 @@ public sealed class Contractor
 
     public string? Email { get; set; }
 
-    /// <summary>Trades the contractor works in, e.g. "Plumbing", "Electrical".</summary>
-    public List<string> Trades { get; set; } = [];
+    /// <summary>Trades the contractor works in; the same values as a project's types.</summary>
+    public List<ProjectType> Trades { get; set; } = [];
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
