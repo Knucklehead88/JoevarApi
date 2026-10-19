@@ -86,7 +86,7 @@ public static class SmsInboundEndpoints
             var customer = await monday.FindCustomerByPhoneAsync(sender, cancellationToken);
             if (customer is not null)
             {
-                await monday.CreateUpdateAsync(customer.ItemId, logText.ToString(), null, cancellationToken, customer.CustomerName);
+                await monday.PostCustomerMessageAsync(customer, logText.ToString(), cancellationToken);
             }
             else if (fromForwardingNumber)
             {

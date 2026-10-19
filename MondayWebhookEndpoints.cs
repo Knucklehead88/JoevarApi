@@ -101,15 +101,17 @@ public static class MondayWebhookEndpoints
                 return Results.Ok();
             }
 
-            // Only prefixed updates go to the customer; this also skips the log entries this API writes.
+            // Only new top-level updates addressed to "@Customer" are texted; replies in a thread are never sent.
             text = text.Trim();
-            if (!text.StartsWith(settings.ReplyPrefix, StringComparison.OrdinalIgnoreCase))
+            if (!text.StartsWith('@') ||
+                GetString(mondayEvent, "replyId") is not null ||
+                GetString(mondayEvent, "parentId") is not null)
             {
                 return Results.Ok();
             }
 
-            var message = text[settings.ReplyPrefix.Length..].Trim();
-            if (message.Length == 0)
+            // Customer texts posted by this API also start with "@Customer"; never send those back.
+            if (monday.IsPostedCustomerMessage(itemId, text))
             {
                 return Results.Ok();
             }
@@ -117,18 +119,12 @@ public static class MondayWebhookEndpoints
             // Always answer 200 from here on: monday.com retries failed webhooks, which would resend the SMS.
             try
             {
-                var conversation = await monday.FindCustomerByBoardAsync(boardId, cancellationToken);
-                if (conversation is null)
+                var customer = await monday.FindCustomerByBoardAsync(boardId, cancellationToken);
+                if (customer is null || !MondayClient.TryGetMessageForCustomer(text, customer, out var message))
                 {
-                    await monday.CreateUpdateAsync(
-                        itemId,
-                        "❌ Not sent: this board has no customer phone number.",
-                        updateId,
-                        cancellationToken);
+                    // An @mention of a monday user, or a board without a customer phone.
                     return Results.Ok();
                 }
-
-                var phoneNumber = conversation.PhoneNumber;
 
                 try
                 {
@@ -136,25 +132,15 @@ public static class MondayWebhookEndpoints
                     var sent = await MessageResource.CreateAsync(
                         body: message,
                         from: new PhoneNumber(twilio.FromPhoneNumber),
-                        to: new PhoneNumber(phoneNumber));
+                        to: new PhoneNumber(customer.PhoneNumber));
 
-                    // Replies posted on other items of the board are copied into the customer's thread.
-                    if (conversation.ItemId != itemId)
-                    {
-                        await monday.CreateUpdateAsync(
-                            conversation.ItemId,
-                            $"➡ Joevar:{Environment.NewLine}{message}",
-                            null,
-                            cancellationToken);
-                    }
-
-                    logger.LogInformation("Sent Monday.com reply as SMS {MessageSid}.", sent.Sid);
+                    logger.LogInformation("Sent Monday.com update to {Customer} as SMS {MessageSid}.", customer.Handle, sent.Sid);
                 }
                 catch (ApiException exception)
                 {
                     logger.LogError(
                         exception,
-                        "Twilio rejected the Monday.com reply. StatusCode={StatusCode}, ErrorCode={ErrorCode}",
+                        "Twilio rejected the Monday.com update. StatusCode={StatusCode}, ErrorCode={ErrorCode}",
                         exception.Status,
                         exception.Code);
                     await monday.CreateUpdateAsync(

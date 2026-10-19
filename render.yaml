@@ -20,13 +20,7 @@ services:
         value: You are opted in to receive SMS messages. Reply STOP to unsubscribe.
       - key: Monday__ApiToken
         sync: false
-      - key: Monday__PhoneColumnId
-        sync: false
-      - key: Monday__BoardIds
-        sync: false
       - key: Monday__WebhookUrl
         sync: false
       - key: Monday__WebhookSecret
         sync: false
-      - key: Monday__ReplyPrefix
-        value: /sms

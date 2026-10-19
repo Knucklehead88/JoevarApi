@@ -7,9 +7,13 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
 /// <summary>A customer board and the item holding the customer's phone number (E.164).</summary>
-public sealed record CustomerBoard(string BoardId, string CustomerName, string ItemId, string PhoneNumber);
+public sealed record CustomerBoard(string BoardId, string CustomerName, string ItemId, string PhoneNumber)
+{
+    /// <summary>How the customer is addressed in monday updates, e.g. "@TestCustomer".</summary>
+    public string Handle => "@" + string.Concat(CustomerName.Where(character => !char.IsWhiteSpace(character)));
+}
 
-/// <summary>Customer board lookup and webhook registration state shared across requests.</summary>
+/// <summary>Customer board lookup, webhook registration and echo state shared across requests.</summary>
 public sealed class MondayCustomerCache
 {
     public SemaphoreSlim RefreshLock { get; } = new(1, 1);
@@ -19,11 +23,14 @@ public sealed class MondayCustomerCache
     public DateTimeOffset LoadedAt { get; set; } = DateTimeOffset.MinValue;
 
     public ConcurrentDictionary<string, byte> WebhookBoards { get; } = new();
+
+    /// <summary>Customer messages this API just posted, so their webhook echo is not texted back to the customer.</summary>
+    public ConcurrentDictionary<string, DateTimeOffset> PostedCustomerMessages { get; } = new();
 }
 
 /// <summary>
-/// Logs SMS conversations to monday.com. A customer board is any board with a phone number in the
-/// <see cref="MondayOptions.PhoneColumnId"/> column; messages go as updates on that item.
+/// Logs SMS conversations to monday.com. A customer board is any board (except ticket boards) with a phone number
+/// in a column titled "Phone"; updates starting with the customer's @handle are texted to them.
 /// </summary>
 public sealed class MondayClient(
     HttpClient httpClient,
@@ -36,14 +43,14 @@ public sealed class MondayClient(
     // A forced refresh (unknown phone or board) is skipped if the cache is younger than this, so spam can't hammer monday.
     private static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(30);
 
+    private static readonly TimeSpan EchoLifetime = TimeSpan.FromMinutes(5);
+
     // "Norman Winkfield- Customer" / "Norman Winkfield — Customer" / "Norman Winkfield —" -> "Norman Winkfield"
-    private static readonly Regex CustomerSuffixRegex = new(@"[\s\-–—]*(Customer)?[\s\-–—]*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex CustomerSuffixRegex = new(@"\s*[-–—]+\s*(Customer)?\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly MondayOptions settings = options.Value;
 
-    public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(settings.ApiToken) &&
-        !string.IsNullOrWhiteSpace(settings.PhoneColumnId);
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(settings.ApiToken);
 
     /// <summary>Finds the customer board whose phone number matches, or null for an unknown number.</summary>
     public async Task<CustomerBoard?> FindCustomerByPhoneAsync(string phoneNumber, CancellationToken cancellationToken)
@@ -71,12 +78,6 @@ public sealed class MondayClient(
     /// </summary>
     public async Task<CustomerBoard?> FindCustomerByBoardAsync(string boardId, CancellationToken cancellationToken)
     {
-        var allowedBoardIds = AllowedBoardIds;
-        if (allowedBoardIds.Count > 0 && !allowedBoardIds.Contains(boardId))
-        {
-            return null;
-        }
-
         var customer = (await LoadBoardsAsync([boardId], cancellationToken)).FirstOrDefault();
 
         // Keep the cache in step, so inbound texts from the new number match and the old number no longer does.
@@ -87,7 +88,7 @@ public sealed class MondayClient(
         return customer;
     }
 
-    /// <summary>Reloads the customer boards and registers the reply webhook on each of them.</summary>
+    /// <summary>Reloads the customer boards and registers the update webhook on each of them.</summary>
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         var customers = await GetCustomersAsync(forceRefresh: true, cancellationToken);
@@ -105,13 +106,31 @@ public sealed class MondayClient(
         }
     }
 
-    /// <summary>Posts an update on the item, or a reply to an existing update. An optional author name is shown in bold.</summary>
+    /// <summary>
+    /// Posts a customer's text as "@Handle message": a reply to the last message sent to them, or a new update
+    /// on their phone item if nothing was sent yet.
+    /// </summary>
+    public async Task PostCustomerMessageAsync(CustomerBoard customer, string message, CancellationToken cancellationToken)
+    {
+        var text = $"{customer.Handle} {message}";
+        var lastSent = await FindLastSentMessageAsync(customer, cancellationToken);
+
+        // Remember it before posting: monday may deliver the webhook before create_update returns.
+        RememberPostedCustomerMessage(lastSent?.ItemId ?? customer.ItemId, text);
+        await CreateUpdateAsync(lastSent?.ItemId ?? customer.ItemId, text, lastSent?.UpdateId, cancellationToken);
+    }
+
+    /// <summary>True when the update is a customer message this API posted itself.</summary>
+    public bool IsPostedCustomerMessage(string itemId, string text) =>
+        cache.PostedCustomerMessages.TryRemove(EchoKey(itemId, text), out var postedAt) &&
+        DateTimeOffset.UtcNow - postedAt < EchoLifetime;
+
+    /// <summary>Posts plain text as an update on the item, or as a reply to an existing update.</summary>
     public async Task CreateUpdateAsync(
         string itemId,
         string text,
         string? parentUpdateId,
-        CancellationToken cancellationToken,
-        string? authorName = null)
+        CancellationToken cancellationToken)
     {
         const string query = """
             mutation ($itemId: ID!, $body: String!, $parentId: ID) {
@@ -119,12 +138,47 @@ public sealed class MondayClient(
             }
             """;
         var body = WebUtility.HtmlEncode(text).ReplaceLineEndings("<br>");
-        if (!string.IsNullOrWhiteSpace(authorName))
+        await ExecuteAsync(query, new { itemId, body, parentId = parentUpdateId }, cancellationToken);
+    }
+
+    /// <summary>
+    /// If <paramref name="text"/> starts with the customer's @handle (spaces and case ignored, so "@Test Customer"
+    /// matches "@TestCustomer"), returns the message after it.
+    /// </summary>
+    public static bool TryGetMessageForCustomer(string text, CustomerBoard customer, out string message)
+    {
+        message = string.Empty;
+        text = text.Trim();
+        if (!text.StartsWith('@'))
         {
-            body = $"<strong>{WebUtility.HtmlEncode(authorName)}:</strong> {body}";
+            return false;
         }
 
-        await ExecuteAsync(query, new { itemId, body, parentId = parentUpdateId }, cancellationToken);
+        var handle = customer.Handle[1..];
+        var position = 1;
+        foreach (var expected in handle)
+        {
+            while (position < text.Length && char.IsWhiteSpace(text[position]))
+            {
+                position++;
+            }
+
+            if (position >= text.Length || char.ToUpperInvariant(text[position]) != char.ToUpperInvariant(expected))
+            {
+                return false;
+            }
+
+            position++;
+        }
+
+        // The handle must end at a word boundary ("@TestCustomers" is not "@TestCustomer").
+        if (position < text.Length && char.IsLetterOrDigit(text[position]))
+        {
+            return false;
+        }
+
+        message = text[position..].TrimStart(' ', ':', ',', '-').Trim();
+        return message.Length > 0;
     }
 
     /// <summary>Normalizes a phone number to E.164; 10-digit numbers are treated as US numbers.</summary>
@@ -142,6 +196,38 @@ public sealed class MondayClient(
         }
 
         return digits.Length >= 8 ? "+" + digits : null;
+    }
+
+    private void RememberPostedCustomerMessage(string itemId, string text)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var expired in cache.PostedCustomerMessages.Where(entry => now - entry.Value > EchoLifetime))
+        {
+            cache.PostedCustomerMessages.TryRemove(expired.Key, out _);
+        }
+
+        cache.PostedCustomerMessages[EchoKey(itemId, text)] = now;
+    }
+
+    private static string EchoKey(string itemId, string text) =>
+        $"{itemId}|{string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))}";
+
+    /// <summary>Finds the newest top-level update on the customer's board addressed to their @handle.</summary>
+    private async Task<(string ItemId, string UpdateId)?> FindLastSentMessageAsync(CustomerBoard customer, CancellationToken cancellationToken)
+    {
+        const string query = "query ($boardIds: [ID!]) { boards(ids: $boardIds) { updates(limit: 50) { id item_id text_body created_at } } }";
+        var data = await ExecuteAsync(query, new { boardIds = new[] { customer.BoardId } }, cancellationToken);
+        var boards = data.GetProperty("boards");
+        if (boards.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        return boards[0].GetProperty("updates").EnumerateArray()
+            .Where(update => TryGetMessageForCustomer(update.GetProperty("text_body").GetString() ?? string.Empty, customer, out _))
+            .OrderByDescending(update => update.GetProperty("created_at").GetString(), StringComparer.Ordinal)
+            .Select(update => ((string ItemId, string UpdateId)?)(update.GetProperty("item_id").GetString()!, update.GetProperty("id").GetString()!))
+            .FirstOrDefault();
     }
 
     private async Task<CustomerBoard?> FindCustomerAsync(Func<CustomerBoard, bool> predicate, CancellationToken cancellationToken)
@@ -179,7 +265,7 @@ public sealed class MondayClient(
             logger.LogInformation(
                 "Loaded {Count} Monday.com customer boards: {Customers}.",
                 cache.Customers.Count,
-                string.Join(", ", cache.Customers.Select(customer => customer.CustomerName)));
+                string.Join(", ", cache.Customers.Select(customer => customer.Handle)));
             return cache.Customers;
         }
         finally
@@ -188,33 +274,21 @@ public sealed class MondayClient(
         }
     }
 
-    private HashSet<string> AllowedBoardIds =>
-        (settings.BoardIds ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToHashSet();
-
     private async Task<IReadOnlyList<CustomerBoard>> LoadCustomersAsync(CancellationToken cancellationToken)
     {
         const int pageSize = 100;
         const string boardsQuery = "query ($page: Int!) { boards(limit: 100, page: $page, state: active) { id type } }";
 
-        // When BoardIds is set, only those boards are used (e.g. a test board); otherwise every board is scanned.
-        var allowedBoardIds = AllowedBoardIds;
         var boardIds = new List<string>();
         for (var page = 1; ; page++)
         {
             var data = await ExecuteAsync(boardsQuery, new { page }, cancellationToken);
             var boards = data.GetProperty("boards");
-            foreach (var board in boards.EnumerateArray())
-            {
-                // Skip subitem boards and docs; they never hold the customer's phone.
-                var boardId = board.GetProperty("id").GetString()!;
-                if (board.GetProperty("type").GetString() == "board" &&
-                    (allowedBoardIds.Count == 0 || allowedBoardIds.Contains(boardId)))
-                {
-                    boardIds.Add(boardId);
-                }
-            }
+
+            // Skip subitem boards and docs; they never hold the customer's phone.
+            boardIds.AddRange(boards.EnumerateArray()
+                .Where(board => board.GetProperty("type").GetString() == "board")
+                .Select(board => board.GetProperty("id").GetString()!));
 
             if (boards.GetArrayLength() < pageSize)
             {
@@ -223,7 +297,7 @@ public sealed class MondayClient(
         }
 
         var customers = new List<CustomerBoard>();
-        foreach (var batch in boardIds.Chunk(10))
+        foreach (var batch in boardIds.Chunk(5))
         {
             customers.AddRange(await LoadBoardsAsync(batch, cancellationToken));
         }
@@ -231,41 +305,55 @@ public sealed class MondayClient(
         return customers;
     }
 
-    /// <summary>Reads the current phone number and name of the given boards; boards without a phone are left out.</summary>
+    /// <summary>
+    /// Reads the current phone number and customer name of the given boards. Ticket boards and boards
+    /// without a phone number are left out.
+    /// </summary>
     private async Task<IReadOnlyList<CustomerBoard>> LoadBoardsAsync(IReadOnlyList<string> boardIds, CancellationToken cancellationToken)
     {
-        // Boards duplicated from the same template keep the same column IDs, so one Phone column ID covers all customers.
         const string query = """
-            query ($boardIds: [ID!], $columnIds: [String!]) {
+            query ($boardIds: [ID!]) {
               boards(ids: $boardIds) {
                 id
                 name
-                items_page(limit: 25) { items { id column_values(ids: $columnIds) { text } } }
+                items_page(limit: 25) { items { id column_values { type text column { title } } } }
               }
             }
             """;
-        var data = await ExecuteAsync(
-            query,
-            new { boardIds, columnIds = new[] { settings.PhoneColumnId } },
-            cancellationToken);
+        var data = await ExecuteAsync(query, new { boardIds }, cancellationToken);
 
         var customers = new List<CustomerBoard>();
         foreach (var board in data.GetProperty("boards").EnumerateArray())
         {
+            var boardName = board.GetProperty("name").GetString()?.Trim() ?? string.Empty;
+            if (boardName.Contains("Ticket", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var match = board.GetProperty("items_page").GetProperty("items").EnumerateArray()
                 .SelectMany(item => item.GetProperty("column_values").EnumerateArray()
+                    .Where(IsPhoneColumn)
                     .Select(column => (ItemId: item.GetProperty("id").GetString()!, Phone: NormalizePhoneNumber(column.GetProperty("text").GetString()))))
                 .FirstOrDefault(entry => entry.Phone is not null);
 
             if (match.Phone is not null)
             {
-                var customerName = CustomerSuffixRegex.Replace(board.GetProperty("name").GetString()?.Trim() ?? string.Empty, string.Empty);
+                var customerName = CustomerSuffixRegex.Replace(boardName, string.Empty);
                 customers.Add(new CustomerBoard(board.GetProperty("id").GetString()!, customerName, match.ItemId, match.Phone));
             }
         }
 
         return customers;
     }
+
+    // A monday Phone column, or any column titled "Phone".
+    private static bool IsPhoneColumn(JsonElement columnValue) =>
+        columnValue.GetProperty("type").GetString() == "phone" ||
+        string.Equals(
+            columnValue.GetProperty("column").GetProperty("title").GetString()?.Trim(),
+            "Phone",
+            StringComparison.OrdinalIgnoreCase);
 
     private async Task EnsureWebhookAsync(string boardId, string eventName, CancellationToken cancellationToken)
     {
@@ -352,18 +440,9 @@ public sealed class MondayOptions
 
     public string? ApiToken { get; init; }
 
-    /// <summary>ID of the column holding the customer's phone number; the same on every customer board.</summary>
-    public string? PhoneColumnId { get; init; }
-
-    /// <summary>Optional comma-separated board IDs to limit SMS logging to; empty means every board with a phone.</summary>
-    public string? BoardIds { get; init; }
-
     /// <summary>Public URL of /api/monday/webhook, used to register webhooks on boards.</summary>
     public string? WebhookUrl { get; init; }
 
     /// <summary>Shared secret expected in the monday webhook URL (?token=...).</summary>
     public string? WebhookSecret { get; init; }
-
-    /// <summary>Only updates starting with this prefix are texted to the customer; everything else stays an internal note.</summary>
-    public string ReplyPrefix { get; init; } = "/sms";
 }
