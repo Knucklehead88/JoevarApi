@@ -7,6 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddValidation();
+
+// Enums go over the wire as names ("Roofing"), which is what the Vue frontend works with.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+
 builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(TwilioOptions.SectionName));
 builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
 builder.Services.AddSingleton<MondayCustomerCache>();
@@ -16,8 +21,10 @@ builder.Services.AddHostedService<MondayRefreshService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy(AuthPolicies.Staff, policy => policy.RequireRole(AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant));
+
 // Bearer-token login endpoints for the Vue frontend (register, login, refresh, ...).
-builder.Services.AddAuthorization();
 builder.Services.AddIdentityApiEndpoints<AppUser>()
     .AddRoles<Microsoft.AspNetCore.Identity.IdentityRole>()
     .AddEntityFrameworkStores<AppDbContext>();
@@ -50,6 +57,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGroup("/api/auth").WithTags("Auth").MapIdentityApi<AppUser>();
+app.MapCustomerEndpoints();
+app.MapProjectEndpoints();
+app.MapContractorEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
 app.MapMondayWebhookEndpoints();

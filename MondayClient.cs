@@ -182,21 +182,7 @@ public sealed class MondayClient(
     }
 
     /// <summary>Normalizes a phone number to E.164; 10-digit numbers are treated as US numbers.</summary>
-    public static string? NormalizePhoneNumber(string? phoneNumber)
-    {
-        if (string.IsNullOrWhiteSpace(phoneNumber))
-        {
-            return null;
-        }
-
-        var digits = new string(phoneNumber.Where(char.IsAsciiDigit).ToArray());
-        if (digits.Length == 10)
-        {
-            digits = "1" + digits;
-        }
-
-        return digits.Length >= 8 ? "+" + digits : null;
-    }
+    public static string? NormalizePhoneNumber(string? phoneNumber) => PhoneNumbers.Normalize(phoneNumber);
 
     private void RememberPostedCustomerMessage(string itemId, string text)
     {
