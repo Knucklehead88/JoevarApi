@@ -117,5 +117,8 @@ public sealed class TwilioOptions
 
     public string? InboundWebhookUrl { get; init; }
 
+    /// <summary>Twilio Verify service (VA...) used for phone-number login codes.</summary>
+    public string? VerifyServiceSid { get; init; }
+
     public string OptInMessage { get; init; } = "You are opted in to receive SMS messages. Reply STOP to unsubscribe.";
 }
