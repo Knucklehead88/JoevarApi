@@ -40,16 +40,33 @@ dotnet run -- create-admin <username> <password>   # one-time: first Admin user
 and passkey domain (`localhost`). Real secrets come from environment variables (`.env.example` lists them;
 `docker compose` reads `.env`). Never commit secrets.
 
+Locally, Twilio secrets live in **user secrets** (`UserSecretsId` 885f587e-11fc-4189-bdb2-e921fed59ee0,
+the same on every machine): `dotnet user-secrets set "Twilio:AccountSid" …` (also `Twilio:AuthToken`,
+`Twilio:VerifyServiceSid`). Each machine has its own database and secrets.
+
+Both dev machines already use port 5432 (Windows: a local PostgreSQL 16 service; Linux: the snap
+`postgresql`), so the DB runs as the container `joevar-db` on **5433** and every `dotnet` command gets
+`ConnectionStrings__Default='Host=localhost;Port=5433;Database=joevar;Username=joevar;Password=joevar_dev'`.
+The Linux checkout keeps an uncommitted edit of `appsettings.Development.json` to 5433; never commit it,
+nor the untracked `.vscode/`.
+
+On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is the `dotnet` snap. In Claude's shell the snap
+launcher aborts with exit 134 and no output; use `DOTNET_ROOT=/var/snap/dotnet/common/dotnet
+/var/snap/dotnet/common/dotnet/dotnet …` (and put that folder first on `PATH` for `dotnet ef`). Plain
+`dotnet` works in the user's own terminal.
+
 ## Code conventions
 
 - **Feature folders**, no namespaces (global namespace, like the existing code): `Auth/`, `Customers/`,
-  `Projects/`, `Contractors/`, `Messaging/`, `Users/`, `Common/`, `Data/`.
+  `Projects/`, `Contractors/`, `Contact/`, `Messaging/`, `Users/`, `Common/`, `Data/`.
 - Endpoints live in static classes with an extension method (`app.MapCustomerEndpoints()`), using
   `MapGroup`, `TypedResults` / `Results<...>` return types, `.WithName()` and `.WithSummary()`.
 - Requests are `sealed record`s with DataAnnotations (validated by `AddValidation()`); responses are
   positional records. Enums are serialized as strings.
 - Lists return `PagedResult<T>` via `ToPagedResultAsync` (`Common/Paging.cs`).
-- Phone numbers are normalized to E.164 with `PhoneNumbers.Normalize` (10 digits = US).
+- Phone numbers are normalized to E.164 with `PhoneNumbers.Normalize` (10 digits = US). Known problem:
+  a Romanian local number like `0755 576 000` becomes `+10755576000`; `+40 …` works. Ask whether
+  customers are in Romania, the US or both before changing it.
 - Keep comment density low: comment the *why*, not the obvious.
 - Avoid type names that clash with dependencies (that's why the entity is `ContactPhone`, not
   `PhoneNumber`, which Twilio uses; and `AppRoles`, not `Roles`, which `IdentityDbContext` has).
@@ -61,7 +78,9 @@ and passkey domain (`localhost`). Real secrets come from environment variables (
   Don't rewrite migrations that have been pushed; add a new one.
 - Entities: `Customer` and `Contractor` (one `ContactPhone` each), `Project` (status, `Types` list,
   `StartsAt`/`EndsAt` timeline, description), `SmsConsent` (opt-in/out history per phone, as proof of
-  consent), `Message` (SMS log), `AppUser` (optionally linked to a customer/contractor).
+  consent), `Message` (SMS log), `ContactMessage` (website Contact form, via the public
+  `POST /api/contact`, rate limited to 5 per hour per IP; no endpoint to read them yet), `AppUser`
+  (optionally linked to a customer/contractor).
 - `ProjectType` is shared by project types and contractor trades. Enums are stored as text and lists as
   `text[]`.
 
@@ -70,13 +89,16 @@ and passkey domain (`localhost`). Real secrets come from environment variables (
 - **Staff** (roles Admin, Manager, VA): username + password via Identity's `/api/auth/login`, plus an
   authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
   `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh.
-- **Customers/contractors**: code texted to the phone on file via Twilio Verify, identified by phone
-  (`/api/auth/phone/*`) or by customer/contractor email (`/api/auth/email/*`; an email that maps to more
-  than one phone number is refused). Neither reveals whether an account exists. Their login is created on
-  first use, with `UserName` = E.164 phone, and linked to the matching customer/contractor. They can also
+- **Customers/contractors**: code texted to the phone on file via Twilio Verify (`/api/auth/phone/*`).
+  They must give both their email and phone number. If both belong to the same customer or contractor,
+  they sign in. If neither is on file, a new customer signs up (created after the code is verified, with
+  the email as a placeholder name; contractors are still added by staff). If only one is on file, or they
+  belong to different people, start/verify return 409 `EmailPhoneMismatch` and no code is sent. Their login
+  is created on first use, with `UserName` = E.164 phone, and linked to the matching customer/contractor;
+  each sign-in saves the email they used on the login (`/me` returns it as `email`). They can also
   use passkeys (`/api/auth/passkey/*`; the challenge is in a cookie, so CORS allows credentials) and Sign in
   with Apple (`/api/auth/apple`, linked once after a phone login).
-- `/api/auth/register` is blocked (no self-registration). `GET /api/auth/me` returns roles, links and
+- `/api/auth/register` is blocked (customers sign up through the phone login above). `GET /api/auth/me` returns roles, links and
   sign-in methods. Public login endpoints are rate limited (`AuthRateLimits`).
 - Tokens are Identity's opaque bearer tokens (not JWTs).
 
@@ -94,7 +116,12 @@ and passkey domain (`localhost`). Real secrets come from environment variables (
 
 - Azure deployment (GitHub Actions, App Service, Postgres Flexible Server, forwarded client IPs for rate
   limiting, shared parent domain for frontend + API so passkeys work).
-- Staff management endpoints; customer/contractor portal endpoints.
+- **Contact form email:** `POST /api/contact` only saves to `ContactMessages`; the user wants each
+  message emailed to Joevar. Undecided between Twilio SendGrid (separate account, API key, verified
+  sender/domain) and Resend (used in the user's Bumvar.Resend.API). Plan: save first, then send with the
+  visitor as Reply-To, log failures without failing the request; settings as user secrets
+  (`SendGrid:ApiKey`/`FromEmail`/`ToEmail` or the Resend equivalent). Also: a staff endpoint to list them.
+- Staff management endpoints (for now: `create-admin` per person); customer/contractor portal endpoints.
 - Sync between the database and monday.com (the database becomes the system of record).
 - Apple sign-in doesn't check a nonce yet. Changing a customer's phone doesn't revoke existing
   passkeys/Apple links.
