@@ -40,7 +40,11 @@ builder.Services.AddIdentityApiEndpoints<AppUser>(options => options.Stores.Sche
 builder.Services.Configure<IdentityPasskeyOptions>(options =>
     options.ServerDomain = builder.Configuration["Passkeys:ServerDomain"]);
 
-builder.Services.AddRateLimiter(options => options.AddAuthRateLimits());
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddAuthRateLimits();
+    options.AddContactRateLimit();
+});
 
 // The Vue frontend and the Shopify storefront (SMS opt-in form) call this API from the browser.
 // Credentials are allowed because the passkey challenge travels in a cookie.
@@ -94,6 +98,7 @@ app.MapCurrentUserEndpoints();
 app.MapCustomerEndpoints();
 app.MapProjectEndpoints();
 app.MapContractorEndpoints();
+app.MapContactEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
 app.MapMondayWebhookEndpoints();

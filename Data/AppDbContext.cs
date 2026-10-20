@@ -16,6 +16,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
     public DbSet<Message> Messages => Set<Message>();
 
+    public DbSet<ContactMessage> ContactMessages => Set<ContactMessage>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -65,6 +67,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             consent.Property(c => c.IpAddress).HasMaxLength(45);
             consent.HasIndex(c => new { c.ContactPhoneId, c.RecordedAt });
             consent.HasOne(c => c.ContactPhone).WithMany(p => p.Consents).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ContactMessage>(contact =>
+        {
+            contact.Property(c => c.Name).HasMaxLength(200);
+            contact.Property(c => c.Email).HasMaxLength(320);
+            contact.Property(c => c.Phone).HasMaxLength(20);
+            contact.Property(c => c.Body).HasMaxLength(4000);
+            contact.HasIndex(c => c.CreatedAt);
         });
 
         builder.Entity<Message>(message =>
