@@ -50,10 +50,9 @@ Both dev machines already use port 5432 (Windows: a local PostgreSQL 16 service;
 The Linux checkout keeps an uncommitted edit of `appsettings.Development.json` to 5433; never commit it,
 nor the untracked `.vscode/`.
 
-On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is the `dotnet` snap. In Claude's shell the snap
-launcher aborts with exit 134 and no output; use `DOTNET_ROOT=/var/snap/dotnet/common/dotnet
-/var/snap/dotnet/common/dotnet/dotnet …` (and put that folder first on `PATH` for `dotnet ef`). Plain
-`dotnet` works in the user's own terminal.
+On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk-10.0` package
+(`/usr/bin/dotnet`); plain `dotnet` works everywhere. (The `dotnet` snap used before was removed on
+2026-10-21 after its SDK went missing; don't reinstall it.)
 
 ## Code conventions
 
@@ -77,9 +76,12 @@ launcher aborts with exit 134 and no output; use `DOTNET_ROOT=/var/snap/dotnet/c
   `Data/Migrations`. Add one with `dotnet ef migrations add <Name> --output-dir Data/Migrations`.
   Don't rewrite migrations that have been pushed; add a new one.
 - Entities: `Customer` and `Contractor` (one `ContactPhone` each), `Project` (status, `Types` list,
-  `StartsAt`/`EndsAt` timeline, description), `SmsConsent` (opt-in/out history per phone, as proof of
-  consent), `Message` (SMS log), `ContactMessage` (website Contact form, via the public
-  `POST /api/contact`, rate limited to 5 per hour per IP; no endpoint to read them yet), `AppUser`
+  `StartsAt`/`EndsAt` timeline, description), `SmsConsent` (opt-in/out history as proof of consent: E.164
+  `PhoneNumber`, optional link to a customer's/contractor's `ContactPhone`, wording in `Evidence` +
+  `EvidenceVersion`, `SourceUrl`, `IpAddress`, `RecordedAt`; `POST /api/sms/opt-in` records one before texting the
+  confirmation), `Message` (SMS log), `ContactMessage` (website Contact form, via the public
+  `POST /api/contact`, rate limited to 5 per hour per IP; saved, then emailed by `ContactEmailSender`; no
+  endpoint to read them yet), `AppUser`
   (optionally linked to a customer/contractor).
 - `ProjectType` is shared by project types and contractor trades. Enums are stored as text and lists as
   `text[]`.
@@ -98,12 +100,32 @@ launcher aborts with exit 134 and no output; use `DOTNET_ROOT=/var/snap/dotnet/c
   each sign-in saves the email they used on the login (`/me` returns it as `email`). They can also
   use passkeys (`/api/auth/passkey/*`; the challenge is in a cookie, so CORS allows credentials) and Sign in
   with Apple (`/api/auth/apple`, linked once after a phone login).
+- **Sign in / sign up with Google** (`Auth/GoogleLogin.cs`, `POST /api/auth/google` with `{ accessToken }`
+  from the frontend's GIS token client, `Google:ClientId`). `GoogleTokenValidator` (typed HttpClient) checks
+  the token with Google: `tokeninfo` must show our client ID as `aud`, `userinfo` gives sub/name/email and
+  the email must be verified. **One account per person**, matched in order: the login linked to that Google
+  `sub`; the single login whose `NormalizedEmail` matches; the customer/contractor with that email (their
+  existing login, or a new `google-{sub}` login linked to them); otherwise a new Customer (Google name, email,
+  no phone) and login. Each new match is linked (provider "Google"). Several matches: 409
+  `GoogleEmailAmbiguous`.
+- Phone sign-in reuses a customer's/contractor's existing login (e.g. created by Google) before creating one
+  named after the phone. If the email belongs to a Google-linked login and the phone isn't on file with it,
+  start/verify return 409 `EmailUsesGoogle`: a texted code proves the phone, not the email, so a new phone is
+  never attached to someone's Google account (prevents takeover by typing their email).
+- Note the email saved on a phone login is whatever was typed at sign-in, not verified by us.
 - `/api/auth/register` is blocked (customers sign up through the phone login above). `GET /api/auth/me` returns roles, links and
   sign-in methods. Public login endpoints are rate limited (`AuthRateLimits`).
 - Tokens are Identity's opaque bearer tokens (not JWTs).
 
 ## Integrations
 
+- **Email** (`Contact/ContactEmailSender.cs`, MailKit): Contact form messages go out through Gmail SMTP
+  (`smtp.gmail.com:587`, STARTTLS) logged in to a Google Workspace mailbox with an **app password**. Settings
+  `Email:Username`/`Password`/`From`/`To` (+ `Host`, `Port`, `FromName`), user secrets locally. Saved first,
+  then sent with the visitor as Reply-To; a send failure or missing settings is only logged (the visitor
+  still gets 204). `System.Security.Cryptography.Pkcs` is referenced directly to override the vulnerable
+  10.0.0 that MailKit pulls in.
+- **Google**: `Google:ClientId` (user secret locally) = the web client ID from the Google Cloud project; see `Auth/GoogleLogin.cs`.
 - **Twilio**: inbound SMS webhook `/api/sms/inbound` (signature-validated), opt-in `/api/sms/opt-in`,
   Verify for login codes. US A2P 10DLC registration was rejected once; never message numbers without
   consent (TCPA / carrier rules). Bulk contractor texting must be opt-in only.
@@ -116,11 +138,7 @@ launcher aborts with exit 134 and no output; use `DOTNET_ROOT=/var/snap/dotnet/c
 
 - Azure deployment (GitHub Actions, App Service, Postgres Flexible Server, forwarded client IPs for rate
   limiting, shared parent domain for frontend + API so passkeys work).
-- **Contact form email:** `POST /api/contact` only saves to `ContactMessages`; the user wants each
-  message emailed to Joevar. Undecided between Twilio SendGrid (separate account, API key, verified
-  sender/domain) and Resend (used in the user's Bumvar.Resend.API). Plan: save first, then send with the
-  visitor as Reply-To, log failures without failing the request; settings as user secrets
-  (`SendGrid:ApiKey`/`FromEmail`/`ToEmail` or the Resend equivalent). Also: a staff endpoint to list them.
+- A staff endpoint to list Contact form messages (they're emailed and saved, but not readable in the app).
 - Staff management endpoints (for now: `create-admin` per person); customer/contractor portal endpoints.
 - Sync between the database and monday.com (the database becomes the system of record).
 - Apple sign-in doesn't check a nonce yet. Changing a customer's phone doesn't revoke existing
