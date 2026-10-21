@@ -64,7 +64,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         {
             consent.Property(c => c.Status).HasConversion<string>().HasMaxLength(20);
             consent.Property(c => c.Source).HasConversion<string>().HasMaxLength(20);
+            consent.Property(c => c.PhoneNumber).HasMaxLength(20);
+            consent.Property(c => c.Evidence).HasMaxLength(2000);
+            consent.Property(c => c.EvidenceVersion).HasMaxLength(40);
+            consent.Property(c => c.SourceUrl).HasMaxLength(500);
             consent.Property(c => c.IpAddress).HasMaxLength(45);
+            consent.HasIndex(c => new { c.PhoneNumber, c.RecordedAt });
             consent.HasIndex(c => new { c.ContactPhoneId, c.RecordedAt });
             consent.HasOne(c => c.ContactPhone).WithMany(p => p.Consents).OnDelete(DeleteBehavior.Cascade);
         });

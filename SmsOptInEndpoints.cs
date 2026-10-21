@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Twilio;
 using Twilio.Exceptions;
@@ -24,6 +25,8 @@ public static class SmsOptInEndpoints
 
     private static async Task<Results<Ok<SmsOptInResponse>, ProblemHttpResult>> SendOptInMessageAsync(
         SmsOptInRequest request,
+        HttpContext httpContext,
+        AppDbContext db,
         IOptions<TwilioOptions> twilioOptions,
         MondayClient monday,
         ILoggerFactory loggerFactory,
@@ -40,6 +43,25 @@ public static class SmsOptInEndpoints
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "SMS service is not configured.");
         }
+
+        // Proof of consent (TCPA / A2P 10DLC): who agreed to what wording, where, when and from which IP. Recorded
+        // before the confirmation text, since the consent was given whether or not that text goes through.
+        var contactPhoneId = await db.ContactPhones
+            .Where(contactPhone => contactPhone.Number == request.PhoneNumber)
+            .Select(contactPhone => (Guid?)contactPhone.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        db.SmsConsents.Add(new SmsConsent
+        {
+            PhoneNumber = request.PhoneNumber,
+            ContactPhoneId = contactPhoneId,
+            Status = SmsConsentStatus.OptedIn,
+            Source = SmsConsentSource.WebForm,
+            Evidence = request.ConsentText?.Trim(),
+            EvidenceVersion = request.ConsentVersion?.Trim(),
+            SourceUrl = request.ConsentSource?.Trim(),
+            IpAddress = httpContext.Connection.RemoteIpAddress?.ToString()
+        });
+        await db.SaveChangesAsync(cancellationToken);
 
         try
         {
@@ -98,6 +120,18 @@ public sealed record SmsOptInRequest
     [Required]
     [RegularExpression(@"^\+[1-9]\d{7,14}$", ErrorMessage = "PhoneNumber must use E.164 format.")]
     public required string PhoneNumber { get; init; }
+
+    /// <summary>The exact consent wording shown next to the checkbox (stored as proof).</summary>
+    [MaxLength(2000)]
+    public string? ConsentText { get; init; }
+
+    /// <summary>The version of that wording, e.g. "2026-10-8".</summary>
+    [MaxLength(40)]
+    public string? ConsentVersion { get; init; }
+
+    /// <summary>The page the form was on.</summary>
+    [MaxLength(500)]
+    public string? ConsentSource { get; init; }
 }
 
 /// <summary>Details returned after Twilio accepts the opt-in message.</summary>

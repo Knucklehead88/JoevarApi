@@ -524,15 +524,25 @@ namespace joevarApi.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("ContactPhoneId")
+                    b.Property<Guid?>("ContactPhoneId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Evidence")
-                        .HasColumnType("text");
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("EvidenceVersion")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("IpAddress")
                         .HasMaxLength(45)
                         .HasColumnType("character varying(45)");
+
+                    b.Property<string>("PhoneNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTimeOffset>("RecordedAt")
                         .HasColumnType("timestamp with time zone");
@@ -542,6 +552,10 @@ namespace joevarApi.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -550,6 +564,8 @@ namespace joevarApi.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ContactPhoneId", "RecordedAt");
+
+                    b.HasIndex("PhoneNumber", "RecordedAt");
 
                     b.ToTable("SmsConsents");
                 });
@@ -723,8 +739,7 @@ namespace joevarApi.Data.Migrations
                     b.HasOne("ContactPhone", "ContactPhone")
                         .WithMany("Consents")
                         .HasForeignKey("ContactPhoneId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("ContactPhone");
                 });
