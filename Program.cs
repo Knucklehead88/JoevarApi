@@ -17,6 +17,8 @@ builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(Twili
 builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
 builder.Services.Configure<AppleOptions>(builder.Configuration.GetSection(AppleOptions.SectionName));
 builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+builder.Services.AddTransient<ContactEmailSender>();
 builder.Services.AddSingleton<MondayCustomerCache>();
 builder.Services.AddHttpClient<MondayClient>();
 builder.Services.AddHostedService<MondayRefreshService>();

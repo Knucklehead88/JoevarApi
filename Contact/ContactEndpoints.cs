@@ -28,6 +28,7 @@ public static class ContactEndpoints
     private static async Task<Results<NoContent, ValidationProblem>> SendContactMessageAsync(
         ContactMessageRequest request,
         AppDbContext db,
+        ContactEmailSender emailSender,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -36,15 +37,27 @@ public static class ContactEndpoints
             return problem!;
         }
 
-        db.ContactMessages.Add(new ContactMessage
+        var contact = new ContactMessage
         {
             Name = request.Name.Trim(),
             Email = request.Email.Trim(),
             Phone = phone,
             Body = request.Message.Trim()
-        });
+        };
+        db.ContactMessages.Add(contact);
         await db.SaveChangesAsync(cancellationToken);
-        loggerFactory.CreateLogger("Contact").LogInformation("A contact message was received.");
+        var logger = loggerFactory.CreateLogger("Contact");
+        logger.LogInformation("A contact message was received.");
+
+        // Saved first, so a mail problem never loses a message or shows the visitor an error.
+        try
+        {
+            await emailSender.SendAsync(contact, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(exception, "Contact message {Id} was saved but could not be emailed.", contact.Id);
+        }
 
         return TypedResults.NoContent();
     }
