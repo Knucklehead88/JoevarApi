@@ -54,9 +54,10 @@ public static class PhoneLoginEndpoints
             return InvalidPhone();
         }
 
-        if (await MatchAsync(db, request.Email, phone, cancellationToken) == LoginMatch.Conflict)
+        var match = await MatchAsync(db, request.Email, phone, cancellationToken);
+        if (match is LoginMatch.Conflict or LoginMatch.UsesGoogle)
         {
-            return Conflict();
+            return Conflict(match);
         }
 
         var failure = await SendCodeAsync(phone, twilio, logger);
@@ -90,9 +91,9 @@ public static class PhoneLoginEndpoints
         }
 
         var match = await MatchAsync(db, request.Email, phone, cancellationToken);
-        if (match == LoginMatch.Conflict)
+        if (match is LoginMatch.Conflict or LoginMatch.UsesGoogle)
         {
-            return Conflict();
+            return Conflict(match);
         }
 
         return await SignInWithCodeAsync(
@@ -109,6 +110,12 @@ public static class PhoneLoginEndpoints
 
         /// <summary>The email or the phone is on file, but not together.</summary>
         Conflict,
+
+        /// <summary>
+        /// The email belongs to a Google sign-in and this phone isn't on file with it. A texted code proves the
+        /// phone, not the email, so it must not be attached to that account: they should use Google.
+        /// </summary>
+        UsesGoogle,
     }
 
     /// <summary>How an email and phone relate to the customers and contractors on file (emails ignore case).</summary>
@@ -129,6 +136,19 @@ public static class PhoneLoginEndpoints
         var emailTaken =
             await db.Customers.AnyAsync(customer => customer.Email != null && customer.Email.ToLower() == normalized, cancellationToken) ||
             await db.Contractors.AnyAsync(contractor => contractor.Email != null && contractor.Email.ToLower() == normalized, cancellationToken);
+        if (emailTaken && !phoneTaken)
+        {
+            var normalizedUpper = email.Trim().ToUpperInvariant();
+            var usesGoogle = await db.Users.AnyAsync(user =>
+                user.NormalizedEmail == normalizedUpper &&
+                db.UserLogins.Any(login => login.UserId == user.Id && login.LoginProvider == GoogleLoginEndpoints.LoginProvider),
+                cancellationToken);
+            if (usesGoogle)
+            {
+                return LoginMatch.UsesGoogle;
+            }
+        }
+
         return phoneTaken || emailTaken ? LoginMatch.Conflict : LoginMatch.New;
     }
 
@@ -201,8 +221,15 @@ public static class PhoneLoginEndpoints
             return TypedResults.Unauthorized();
         }
 
-        // One login per phone number, linked to the customer and/or contractor who owns it.
-        var user = await userManager.FindByNameAsync(phone);
+        // One login per person: the one for this phone, else the one the customer/contractor already has (e.g.
+        // created by a Google sign-in), else a new one named after the phone.
+        var customerIds = owners.Where(owner => owner.CustomerId != null).Select(owner => owner.CustomerId).ToList();
+        var contractorIds = owners.Where(owner => owner.ContractorId != null).Select(owner => owner.ContractorId).ToList();
+        var user = await userManager.FindByNameAsync(phone)
+            ?? await userManager.Users
+                .Where(candidate => customerIds.Contains(candidate.CustomerId) || contractorIds.Contains(candidate.ContractorId))
+                .OrderBy(candidate => candidate.UserName)
+                .FirstOrDefaultAsync(cancellationToken);
         if (user is null)
         {
             user = new AppUser { UserName = phone };
@@ -246,11 +273,16 @@ public static class PhoneLoginEndpoints
         !string.IsNullOrWhiteSpace(twilio.AuthToken) &&
         !string.IsNullOrWhiteSpace(twilio.VerifyServiceSid);
 
-    private static ProblemHttpResult Conflict() =>
-        TypedResults.Problem(
-            statusCode: StatusCodes.Status409Conflict,
-            title: "This email or phone number is already on file with different details.",
-            detail: "EmailPhoneMismatch");
+    private static ProblemHttpResult Conflict(LoginMatch match) =>
+        match == LoginMatch.UsesGoogle
+            ? TypedResults.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "This email signs in with Google.",
+                detail: "EmailUsesGoogle")
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "This email or phone number is already on file with different details.",
+                detail: "EmailPhoneMismatch");
 
     private static ProblemHttpResult NotConfigured() =>
         TypedResults.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Phone login is not configured.");

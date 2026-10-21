@@ -16,15 +16,17 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(TwilioOptions.SectionName));
 builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
 builder.Services.Configure<AppleOptions>(builder.Configuration.GetSection(AppleOptions.SectionName));
+builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
 builder.Services.AddSingleton<MondayCustomerCache>();
 builder.Services.AddHttpClient<MondayClient>();
 builder.Services.AddHostedService<MondayRefreshService>();
 builder.Services.AddSingleton<AppleTokenValidator>();
+builder.Services.AddHttpClient<GoogleTokenValidator>();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
-// Staff must have an authenticator app enabled; customers and contractors sign in by phone code, passkey or Apple.
+// Staff must have an authenticator app enabled; customers and contractors sign in by phone code, passkey, Apple or Google.
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy(AuthPolicies.Staff, policy => policy
         .RequireRole(AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant)
@@ -93,6 +95,7 @@ app.MapGroup("/api/auth")
 app.MapPhoneLoginEndpoints();
 app.MapPasskeyEndpoints();
 app.MapAppleLoginEndpoints();
+app.MapGoogleLoginEndpoints();
 app.MapAuthenticatorEndpoints();
 app.MapCurrentUserEndpoints();
 app.MapCustomerEndpoints();
