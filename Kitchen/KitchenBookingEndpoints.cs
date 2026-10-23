@@ -3,7 +3,8 @@ using Microsoft.AspNetCore.Http.HttpResults;
 
 /// <summary>
 /// The Kitchen Design page's "Schedule your free blueprint": anyone can book an on-site design visit with their
-/// chosen options. The booking is saved, then emailed to the office (the customer as Reply-To).
+/// chosen options. The booking is saved as Pending, then emailed to the office (the customer as Reply-To); staff
+/// approve or decline it (<see cref="KitchenBookingStaffEndpoints"/>).
 /// </summary>
 public static class KitchenBookingEndpoints
 {
@@ -15,6 +16,19 @@ public static class KitchenBookingEndpoints
 
     // Joevar is in Forest Park, Illinois: "today" is Chicago's date, not the server's.
     private static readonly TimeZoneInfo LocalTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+
+    /// <summary>Today's date in Joevar's time zone.</summary>
+    public static DateOnly Today() =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, LocalTimeZone).DateTime);
+
+    /// <summary>A slot such as "13:00" as people write it: "1:00 PM".</summary>
+    public static string DisplayTime(string slot) => TimeOnly.ParseExact(slot, "HH:mm").ToString("h:mm tt");
+
+    /// <summary>The selections as an indented email list, or <paramref name="none"/>.</summary>
+    public static string SelectionList(KitchenBooking booking, string none) =>
+        booking.Selections.Count > 0
+            ? string.Join(Environment.NewLine, booking.Selections.Select(selection => $"  - {selection}"))
+            : $"  {none}";
 
     public static IEndpointRouteBuilder MapKitchenBookingEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -42,8 +56,7 @@ public static class KitchenBookingEndpoints
             errors["phone"] = ["Phone must be a valid phone number, e.g. +17735550100."];
         }
 
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, LocalTimeZone).DateTime);
-        var earliest = today.AddDays(LeadDays);
+        var earliest = Today().AddDays(LeadDays);
         if (request.Date < earliest)
         {
             errors["date"] = [$"Choose a date at least {LeadDays} days ahead ({earliest:MMMM d} or later)."];
@@ -77,10 +90,8 @@ public static class KitchenBookingEndpoints
         // Saved first, so a mail problem never loses a booking or shows the customer an error.
         try
         {
-            var time = TimeOnly.ParseExact(booking.AppointmentTime, "HH:mm").ToString("h:mm tt");
-            var selections = booking.Selections.Count > 0
-                ? string.Join(Environment.NewLine, booking.Selections.Select(selection => $"  - {selection}"))
-                : "  (none chosen)";
+            var time = DisplayTime(booking.AppointmentTime);
+            var selections = SelectionList(booking, "(none chosen)");
             await emailSender.SendAsync(
                 $"Kitchen design booking: {booking.Name}, {booking.AppointmentDate:ddd MMM d} at {time}",
                 $"""
@@ -98,7 +109,7 @@ public static class KitchenBookingEndpoints
                 Notes:
                 {booking.Notes ?? "-"}
 
-                Reply to this email to answer {booking.Name}.
+                Approve or decline it in the staff Calendar. Reply to this email to answer {booking.Name}.
                 """,
                 booking.Name,
                 booking.Email,
@@ -129,10 +140,8 @@ public static class KitchenBookingEndpoints
 
     private static string CustomerEmail(KitchenBooking booking)
     {
-        var time = TimeOnly.ParseExact(booking.AppointmentTime, "HH:mm").ToString("h:mm tt");
-        var selections = booking.Selections.Count > 0
-            ? string.Join(Environment.NewLine, booking.Selections.Select(selection => $"  - {selection}"))
-            : "  (none chosen yet; we'll go through the options with you at the visit)";
+        var time = DisplayTime(booking.AppointmentTime);
+        var selections = SelectionList(booking, "(none chosen yet; we'll go through the options with you at the visit)");
         return $"""
             Hi {booking.Name},
 

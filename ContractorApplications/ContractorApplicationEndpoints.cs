@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.EntityFrameworkCore;
 
 /// <summary>
 /// The website's contractor registration: anyone can apply. The application is saved, emailed to the office (the
@@ -22,7 +23,35 @@ public static class ContractorApplicationEndpoints
             .WithName("ApplyAsContractor")
             .WithSummary("Register as a contractor (reviewed by staff)");
 
+        endpoints.MapGet("/api/contractor-applications", ListApplicationsAsync)
+            .WithTags("Contractors")
+            .RequireAuthorization(AuthPolicies.Staff)
+            .WithName("ListContractorApplications")
+            .WithSummary("List contractor registrations, newest first");
+
         return endpoints;
+    }
+
+    private static async Task<Ok<PagedResult<ContractorApplicationResponse>>> ListApplicationsAsync(
+        AppDbContext db,
+        int? page,
+        int? pageSize,
+        CancellationToken cancellationToken)
+    {
+        var result = await db.ContractorApplications.AsNoTracking()
+            .OrderByDescending(application => application.CreatedAt)
+            .Select(application => new ContractorApplicationResponse(
+                application.Id,
+                application.Email,
+                application.FullName,
+                application.CompanyName,
+                application.Professions,
+                application.State,
+                application.City,
+                application.Licenses,
+                application.CreatedAt))
+            .ToPagedResultAsync(page, pageSize, cancellationToken);
+        return TypedResults.Ok(result);
     }
 
     private static async Task<Results<NoContent, ValidationProblem>> ApplyAsync(
@@ -145,6 +174,17 @@ public static class ContractorApplicationEndpoints
         return TypedResults.NoContent();
     }
 }
+
+public sealed record ContractorApplicationResponse(
+    Guid Id,
+    string Email,
+    string FullName,
+    string? CompanyName,
+    List<ProjectType> Professions,
+    string State,
+    string City,
+    List<string> Licenses,
+    DateTimeOffset CreatedAt);
 
 public sealed record ContractorApplicationRequest
 {

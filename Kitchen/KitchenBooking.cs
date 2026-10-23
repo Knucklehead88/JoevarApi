@@ -10,7 +10,10 @@ public sealed class KitchenBooking
     /// <summary>E.164.</summary>
     public required string Phone { get; set; }
 
-    /// <summary>The on-site design visit the customer asked for (Joevar's local date and time).</summary>
+    /// <summary>
+    /// The on-site design visit (Joevar's local date and time): what the customer asked for, or the slot staff moved
+    /// it to when approving.
+    /// </summary>
     public DateOnly AppointmentDate { get; set; }
 
     /// <summary>One of <see cref="KitchenBookingEndpoints.TimeSlots"/>, e.g. "09:00".</summary>
@@ -21,5 +24,21 @@ public sealed class KitchenBooking
 
     public string? Notes { get; set; }
 
+    public KitchenBookingStatus Status { get; set; } = KitchenBookingStatus.Pending;
+
+    /// <summary>When staff approved or declined it.</summary>
+    public DateTimeOffset? DecidedAt { get; set; }
+
+    /// <summary>The user name of the staff member who approved or declined it.</summary>
+    public string? DecidedBy { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>New bookings wait for staff, who approve (confirming the visit) or decline them.</summary>
+public enum KitchenBookingStatus
+{
+    Pending,
+    Approved,
+    Declined
 }

@@ -106,6 +106,7 @@ app.MapProjectEndpoints();
 app.MapContractorEndpoints();
 app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();
+app.MapKitchenBookingStaffEndpoints();
 app.MapContractorApplicationEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();

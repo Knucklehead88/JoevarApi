@@ -96,6 +96,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             booking.Property(b => b.Phone).HasMaxLength(20);
             booking.Property(b => b.AppointmentTime).HasMaxLength(5);
             booking.Property(b => b.Notes).HasMaxLength(4000);
+            booking.Property(b => b.Status).HasConversion<string>().HasMaxLength(20);
+            booking.Property(b => b.DecidedBy).HasMaxLength(256);
+            booking.HasIndex(b => b.Status);
             booking.HasIndex(b => b.AppointmentDate);
             booking.HasIndex(b => b.CreatedAt);
         });
