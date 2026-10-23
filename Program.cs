@@ -49,6 +49,7 @@ builder.Services.AddRateLimiter(options =>
 {
     options.AddAuthRateLimits();
     options.AddContactRateLimit();
+    options.AddVisitorPingRateLimit();
 });
 
 // The Vue frontend and the Shopify storefront (SMS opt-in form) call this API from the browser.
@@ -107,6 +108,7 @@ app.MapContractorEndpoints();
 app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();
 app.MapKitchenBookingStaffEndpoints();
+app.MapVisitorPresenceEndpoints();
 app.MapContractorApplicationEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
