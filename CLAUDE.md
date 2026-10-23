@@ -57,7 +57,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 ## Code conventions
 
 - **Feature folders**, no namespaces (global namespace, like the existing code): `Auth/`, `Customers/`,
-  `Projects/`, `Contractors/`, `Contact/`, `Messaging/`, `Users/`, `Common/`, `Data/`.
+  `Projects/`, `Contractors/`, `Contact/`, `Kitchen/`, `ContractorApplications/`, `Messaging/`, `Users/`, `Common/`, `Data/`.
 - Endpoints live in static classes with an extension method (`app.MapCustomerEndpoints()`), using
   `MapGroup`, `TypedResults` / `Results<...>` return types, `.WithName()` and `.WithSummary()`.
 - Requests are `sealed record`s with DataAnnotations (validated by `AddValidation()`); responses are
@@ -79,8 +79,8 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   `StartsAt`/`EndsAt` timeline, description), `SmsConsent` (opt-in/out history as proof of consent: E.164
   `PhoneNumber`, optional link to a customer's/contractor's `ContactPhone`, wording in `Evidence` +
   `EvidenceVersion`, `SourceUrl`, `IpAddress`, `RecordedAt`; `POST /api/sms/opt-in` records one before texting the
-  confirmation), `Message` (SMS log), `ContactMessage` (website Contact form, via the public
-  `POST /api/contact`, rate limited to 5 per hour per IP; saved, then emailed by `ContactEmailSender`; no
+  confirmation), `Message` (SMS log), `ContractorApplication` (the website's contractor registration: email, full name, company, `Professions` (ProjectType[] stored as text[] of names), `State`, `City`, `Licenses` (text[]); public `POST /api/contractor-applications`, shares the contact rate limit; state must be one of the 50 in `UsCityDirectory.States` (no DC), city must be in that state per countriesnow.space (`UsCityDirectory`, typed HttpClient, cached a day per state; accepted as typed when the service is down), licenses one of `ContractorApplicationEndpoints.Licenses`; saved, emailed to the office and acknowledged to the applicant; no endpoint to read them yet), `KitchenBooking` (Kitchen Design page's "Schedule your free blueprint": name, email, E.164 phone, `AppointmentDate` (date), `AppointmentTime` ("09:00"…, slots in `KitchenBookingEndpoints.TimeSlots`), `Selections` (text[] of "Category: Option"), notes; public `POST /api/kitchen-bookings`, date at least 5 days (`LeadDays`) after Chicago's today, shares the contact rate limit, saved then emailed to the office and a "we received your request" copy with the selections to the customer via `OfficeEmailSender.SendToCustomerAsync`, Reply-To the office), `ContactMessage` (website Contact form, via the public
+  `POST /api/contact`, rate limited to 5 per hour per IP; saved, then emailed by `OfficeEmailSender`; no
   endpoint to read them yet), `AppUser`
   (optionally linked to a customer/contractor).
 - `ProjectType` is shared by project types and contractor trades. Enums are stored as text and lists as
@@ -119,7 +119,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 
 ## Integrations
 
-- **Email** (`Contact/ContactEmailSender.cs`, MailKit): Contact form messages go out through Gmail SMTP
+- **Email** (`Common/OfficeEmailSender.cs`, MailKit): Contact form messages, kitchen bookings and contractor registrations go out through Gmail SMTP
   (`smtp.gmail.com:587`, STARTTLS) logged in to a Google Workspace mailbox with an **app password**. Settings
   `Email:Username`/`Password`/`From`/`To` (+ `Host`, `Port`, `FromName`), user secrets locally. Saved first,
   then sent with the visitor as Reply-To; a send failure or missing settings is only logged (the visitor
