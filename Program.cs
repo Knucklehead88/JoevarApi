@@ -24,6 +24,7 @@ builder.Services.AddHttpClient<MondayClient>();
 builder.Services.AddHostedService<MondayRefreshService>();
 builder.Services.AddSingleton<AppleTokenValidator>();
 builder.Services.AddHttpClient<GoogleTokenValidator>();
+builder.Services.AddHttpClient<UsCityDirectory>();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
@@ -105,6 +106,7 @@ app.MapProjectEndpoints();
 app.MapContractorEndpoints();
 app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();
+app.MapContractorApplicationEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
 app.MapMondayWebhookEndpoints();

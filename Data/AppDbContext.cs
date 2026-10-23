@@ -20,6 +20,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
     public DbSet<KitchenBooking> KitchenBookings => Set<KitchenBooking>();
 
+    public DbSet<ContractorApplication> ContractorApplications => Set<ContractorApplication>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -74,6 +76,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             consent.HasIndex(c => new { c.PhoneNumber, c.RecordedAt });
             consent.HasIndex(c => new { c.ContactPhoneId, c.RecordedAt });
             consent.HasOne(c => c.ContactPhone).WithMany(p => p.Consents).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ContractorApplication>(application =>
+        {
+            application.Property(a => a.Email).HasMaxLength(320);
+            application.Property(a => a.FullName).HasMaxLength(200);
+            application.Property(a => a.CompanyName).HasMaxLength(200);
+            application.PrimitiveCollection(a => a.Professions).ElementType().HasConversion<string>();
+            application.Property(a => a.State).HasMaxLength(40);
+            application.Property(a => a.City).HasMaxLength(100);
+            application.HasIndex(a => a.CreatedAt);
         });
 
         builder.Entity<KitchenBooking>(booking =>
