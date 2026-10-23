@@ -78,6 +78,7 @@ if (args is ["create-admin", var adminUserName, var adminPassword])
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    await StaffSeed.SeedAsync(app.Services);
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
