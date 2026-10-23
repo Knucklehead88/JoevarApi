@@ -28,7 +28,7 @@ public static class ContactEndpoints
     private static async Task<Results<NoContent, ValidationProblem>> SendContactMessageAsync(
         ContactMessageRequest request,
         AppDbContext db,
-        ContactEmailSender emailSender,
+        OfficeEmailSender emailSender,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -52,7 +52,23 @@ public static class ContactEndpoints
         // Saved first, so a mail problem never loses a message or shows the visitor an error.
         try
         {
-            await emailSender.SendAsync(contact, cancellationToken);
+            await emailSender.SendAsync(
+                $"New contact message from {contact.Name}",
+                $"""
+                New message from the Contact form on the Joevar website.
+
+                Name:  {contact.Name}
+                Email: {contact.Email}
+                Phone: {contact.Phone ?? "-"}
+                Sent:  {contact.CreatedAt:yyyy-MM-dd HH:mm} UTC
+
+                {contact.Body}
+
+                Reply to this email to answer {contact.Name}.
+                """,
+                contact.Name,
+                contact.Email,
+                cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
