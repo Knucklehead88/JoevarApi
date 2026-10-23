@@ -104,6 +104,7 @@ app.MapCustomerEndpoints();
 app.MapProjectEndpoints();
 app.MapContractorEndpoints();
 app.MapContactEndpoints();
+app.MapKitchenBookingEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
 app.MapMondayWebhookEndpoints();
