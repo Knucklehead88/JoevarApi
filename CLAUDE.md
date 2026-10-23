@@ -79,7 +79,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   `StartsAt`/`EndsAt` timeline, description), `SmsConsent` (opt-in/out history as proof of consent: E.164
   `PhoneNumber`, optional link to a customer's/contractor's `ContactPhone`, wording in `Evidence` +
   `EvidenceVersion`, `SourceUrl`, `IpAddress`, `RecordedAt`; `POST /api/sms/opt-in` records one before texting the
-  confirmation), `Message` (SMS log), `ContractorApplication` (the website's contractor registration: email, full name, company, `Professions` (ProjectType[] stored as text[] of names), `State`, `City`, `Licenses` (text[]); public `POST /api/contractor-applications`, shares the contact rate limit; state must be one of the 50 in `UsCityDirectory.States` (no DC), city must be in that state per countriesnow.space (`UsCityDirectory`, typed HttpClient, cached a day per state; accepted as typed when the service is down), licenses one of `ContractorApplicationEndpoints.Licenses`; saved, emailed to the office and acknowledged to the applicant; no endpoint to read them yet), `KitchenBooking` (Kitchen Design page's "Schedule your free blueprint": name, email, E.164 phone, `AppointmentDate` (date), `AppointmentTime` ("09:00"…, slots in `KitchenBookingEndpoints.TimeSlots`), `Selections` (text[] of "Category: Option"), notes; public `POST /api/kitchen-bookings`, date at least 5 days (`LeadDays`) after Chicago's today, shares the contact rate limit, saved then emailed to the office and a "we received your request" copy with the selections to the customer via `OfficeEmailSender.SendToCustomerAsync`, Reply-To the office), `ContactMessage` (website Contact form, via the public
+  confirmation), `Message` (SMS log), `ContractorApplication` (the website's contractor registration: email, full name, company, `Professions` (ProjectType[] stored as text[] of names), `State`, `City`, `Licenses` (text[]); public `POST /api/contractor-applications`, shares the contact rate limit; state must be one of the 50 in `UsCityDirectory.States` (no DC), city must be in that state per countriesnow.space (`UsCityDirectory`, typed HttpClient, cached a day per state; accepted as typed when the service is down), licenses one of `ContractorApplicationEndpoints.Licenses`; saved, emailed to the office and acknowledged to the applicant; no endpoint to read them yet), `KitchenBooking` (Kitchen Design page's "Schedule your free blueprint": name, email, E.164 phone, `AppointmentDate` (date), `AppointmentTime` ("09:00"…, slots in `KitchenBookingEndpoints.TimeSlots`), `Selections` (text[] of "Category: Option"), notes; public `POST /api/kitchen-bookings`, date at least 5 days (`LeadDays`) after Chicago's today, shares the contact rate limit, saved then emailed to the office and a "we received your request" copy with the selections to the customer via `OfficeEmailSender.SendToCustomerAsync`, Reply-To the office; `Status` Pending → Approved/Declined with `DecidedAt`/`DecidedBy` (user name), set by the staff endpoints in `Kitchen/KitchenBookingStaffEndpoints.cs`: `GET /api/kitchen-bookings` (status, from/to dates, paging), `POST .../{id}/approve` (optional new date/time; not in the past, LeadDays doesn't apply) and `.../{id}/decline` (optional message), both emailing the customer after saving; 409 when already decided), `ContactMessage` (website Contact form, via the public
   `POST /api/contact`, rate limited to 5 per hour per IP; saved, then emailed by `OfficeEmailSender`; no
   endpoint to read them yet), `AppUser`
   (optionally linked to a customer/contractor).
@@ -138,6 +138,16 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 
 - Azure deployment (GitHub Actions, App Service, Postgres Flexible Server, forwarded client IPs for rate
   limiting, shared parent domain for frontend + API so passkeys work).
+- Live visitors (`Visitors/VisitorPresenceEndpoints.cs`): public `POST /api/visitors/ping` `{ visitorId, path }`
+  (own rate limit, 120 per minute per IP; id 8-64 letters/digits/dashes; at most 10,000 tracked), staff
+  `GET /api/visitors/live` → `{ total, pages }` for pings within 60 s. In memory only: resets on restart and is per
+  instance (with several App Service instances, move it to the database or a cache).
+- `Auth/StaffSeed.cs`: in Development, startup creates the Admins joe, cristi and silviu if missing, with the password
+  from the `Seed:StaffPassword` user secret (skipped when it isn't set; existing users untouched).
+- `GET /api/contractor-applications` (staff) lists registrations, newest first; there's no approve/convert-to-contractor
+  step yet.
+- Gotcha: `dotnet ef migrations add` gives a new non-null string column (like `KitchenBookings.Status`) a default of
+  `""`, which breaks reading existing rows as an enum; set the migration's `defaultValue` (here `"Pending"`).
 - A staff endpoint to list Contact form messages (they're emailed and saved, but not readable in the app).
 - Staff management endpoints (for now: `create-admin` per person); customer/contractor portal endpoints.
 - Sync between the database and monday.com (the database becomes the system of record).
