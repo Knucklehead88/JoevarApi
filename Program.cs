@@ -75,10 +75,19 @@ if (args is ["create-admin", var adminUserName, var adminPassword])
     return;
 }
 
+// In Azure, pending migrations are applied at startup (a single instance, so nothing races it). Locally, run
+// dotnet ef database update yourself.
+if (!app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.MigrateAsync();
+}
+
+await StaffSeed.SeedAsync(app.Services);
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    await StaffSeed.SeedAsync(app.Services);
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
