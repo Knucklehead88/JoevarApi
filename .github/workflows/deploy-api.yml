@@ -1,0 +1,33 @@
+# Builds the API and deploys it to Azure App Service on every push to backend-app. Pending database migrations are
+# applied when the new version starts. Secrets and variables are set by infra/deploy.sh.
+name: Deploy API to Azure
+
+on:
+  push:
+    branches: [backend-app]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: dotnet publish joevarApi.csproj --configuration Release --output publish
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_API_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
+          package: publish
