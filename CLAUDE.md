@@ -134,10 +134,38 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   `@Handle` are texted to the customer (`/api/monday/webhook`, `?token=` secret). The API token's user
   must own a board to register webhooks there; otherwise add the webhook in monday by hand.
 
+## Azure (production)
+
+- `infra/main.bicep`, lowest tiers at the user's request: App Service Linux **F1 (free)** `joevar-api` (.NET 10,
+  HTTPS only, forwarded headers on; sleeps after ~20 idle minutes so the first request is slow and live visitors reset,
+  60 CPU minutes a day, no custom domain: switch `apiPlanSku` to `B1`, ~$13/month, for api.joevar.com) and
+  PostgreSQL 17 Flexible Server **B1ms** `joevar-pg` (32 GB, auto-grow off, database `joevar`, 7-day backups,
+  firewall: Azure services only) and Static Web App `joevar-web` (Free), all in Central US (Iowa). North Central US
+  (Illinois) was the plan, but this trial subscription has 0 App Service quota there and in the other US regions
+  tested (eastus, eastus2, southcentralus, westus2); `az deployment group validate` shows it before creating
+  anything. Resource group `joevar-rg`. The subscription is a Free Trial (quota
+  `FreeTrial_2014-09-01`, spending limit on): $0 while the database is in the free account's 12 months (750 h B1ms +
+  32 GB), then ~$16/month. Upgrade it to Pay-As-You-Go within the trial's 30 days, or Azure disables everything. Subscription "Azure subscription 1" (Azure account
+  joevar83@outlook.com) has a $50 monthly budget `joevar-monthly` that emails office@joevar.com at 80% of actual
+  spend and when the month's forecast passes $50 (created with `az rest`, not in Bicep).
+- Created 2026-10-25: API https://joevar-api.azurewebsites.net, site https://calm-meadow-08a1f4310.3.azurestaticapps.net,
+  database server `joevar-pg.postgres.database.azure.com`.
+- `infra/deploy.sh` creates or updates them (re-runnable): copies the `Twilio:*`, `Email:*` and `Google:*` user
+  secrets into App Service settings through a private temp file (never printed), generates a new database password
+  each run (the connection string follows), and with `gh` signed in sets the GitHub secrets/variables for both repos.
+  Bicep replaces all app settings on each run, so add settings there or in the script, not only in the portal.
+- `.github/workflows/deploy-api.yml`: push to `backend-app` → `dotnet publish` → App Service (publish profile secret
+  `AZURE_API_PUBLISH_PROFILE`, variable `AZURE_API_APP_NAME`). Outside Development the API applies pending migrations
+  at startup (one instance, so no race).
+- Staff logins in Azure: set the App Service setting `Seed__StaffPassword`, restart, then remove it (or SSH in and
+  run `dotnet joevarApi.dll create-admin <name> <password>` in `/home/site/wwwroot`).
+- Passkeys need the site and API on one parent domain, and Apple sign-in a registered HTTPS domain: both wait for the
+  custom domain (app.joevar.com + api.joevar.com or joevar.com). The default site URL is random
+  (`*.azurestaticapps.net`); CORS and `Passkeys__ServerDomain` follow it.
+
 ## Known gaps / next steps
 
-- Azure deployment (GitHub Actions, App Service, Postgres Flexible Server, forwarded client IPs for rate
-  limiting, shared parent domain for frontend + API so passkeys work).
+- Custom domain for the Azure deployment (shared parent domain for frontend + API so passkeys work).
 - Live visitors (`Visitors/VisitorPresenceEndpoints.cs`): public `POST /api/visitors/ping` `{ visitorId, path }`
   (own rate limit, 120 per minute per IP; id 8-64 letters/digits/dashes; at most 10,000 tracked), staff
   `GET /api/visitors/live` → `{ total, pages }` for pings within 60 s. In memory only: resets on restart and is per
