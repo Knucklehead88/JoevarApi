@@ -148,6 +148,10 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   32 GB), then ~$16/month. Upgrade it to Pay-As-You-Go within the trial's 30 days, or Azure disables everything. Subscription "Azure subscription 1" (Azure account
   joevar83@outlook.com) has a $50 monthly budget `joevar-monthly` that emails office@joevar.com at 80% of actual
   spend and when the month's forecast passes $50 (created with `az rest`, not in Bicep).
+- Custom domains (2026-10-25): https://joevar.com and https://www.joevar.com on the Static Web App (Namecheap DNS:
+  ALIAS @ and CNAME www to the azurestaticapps.net host; free managed certificates). The API keeps its azurewebsites.net
+  address (F1 can't have a custom domain); CORS already allows joevar.com and www. `Passkeys__ServerDomain` is still
+  the azurestaticapps.net host until passkeys get a shared parent domain (api.joevar.com needs B1).
 - Created 2026-10-25: API https://joevar-api.azurewebsites.net, site https://calm-meadow-08a1f4310.3.azurestaticapps.net,
   database server `joevar-pg.postgres.database.azure.com`.
 - `infra/deploy.sh` creates or updates them (re-runnable): copies the `Twilio:*`, `Email:*` and `Google:*` user
