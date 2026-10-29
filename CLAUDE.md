@@ -176,6 +176,19 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   instance (with several App Service instances, move it to the database or a cache).
 - `Auth/StaffSeed.cs`: in Development, startup creates the Admins joe, cristi and silviu if missing, with the password
   from the `Seed:StaffPassword` user secret (skipped when it isn't set; existing users untouched).
+- **Web push** (`Notifications/`, package `Lib.Net.Http.WebPush` 3.3.1, MIT, chosen over `WebPush` because it uses
+  .NET's own crypto, not the old Portable.BouncyCastle): VAPID keys in `Push:PublicKey`/`Push:PrivateKey`/`Push:Subject`
+  (user secrets; App Service settings via `infra/deploy.sh`; generated 2026-10-29, push is off without them).
+  `WebPushSubscription` rows belong to a staff user (`UserId`, gets the staff alerts) or a kitchen booking
+  (`KitchenBookingId`, gets that booking's decision), cascade-deleted with them. `GET /api/push/public-key` (anyone),
+  `PUT`/`DELETE /api/push/staff-subscription` (staff), and `push` on `KitchenBookingRequest`. Endpoints must be https
+  on fcm.googleapis.com, push.services.mozilla.com, push.apple.com or notify.windows.com (no posting to arbitrary
+  URLs); an unusable one on a booking is ignored. `StaffAlertInterceptor` (an EF `SaveChangesInterceptor`) queues a
+  staff alert whenever a `KitchenBooking`, `ContractorApplication` or `Customer` is added, from any code path (also
+  staff-created customers); approve/decline queue the customer's ("confirmed", "rescheduled" when moved, "about your
+  request" when declined). `PushQueue` (bounded channel) → `PushSender` (BackgroundService) sends, logs
+  "delivered to N device(s)", and deletes subscriptions the push service answers 404/410 for. Tested against FCM with
+  made-up endpoints and real keys (headless Firefox can't subscribe to Mozilla's push service).
 - `GET /api/contractor-applications` (staff) lists registrations, newest first; there's no approve/convert-to-contractor
   step yet.
 - Gotcha: `dotnet ef migrations add` gives a new non-null string column (like `KitchenBookings.Status`) a default of
