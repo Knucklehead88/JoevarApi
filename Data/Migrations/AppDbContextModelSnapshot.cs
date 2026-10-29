@@ -692,6 +692,47 @@ namespace joevarApi.Data.Migrations
                     b.ToTable("SmsConsents");
                 });
 
+            modelBuilder.Entity("WebPushSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid?>("KitchenBookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Endpoint");
+
+                    b.HasIndex("KitchenBookingId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("WebPushSubscriptions");
+                });
+
             modelBuilder.Entity("AppUser", b =>
                 {
                     b.HasOne("Contractor", "Contractor")
@@ -864,6 +905,19 @@ namespace joevarApi.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("ContactPhone");
+                });
+
+            modelBuilder.Entity("WebPushSubscription", b =>
+                {
+                    b.HasOne("KitchenBooking", null)
+                        .WithMany()
+                        .HasForeignKey("KitchenBookingId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("ContactPhone", b =>

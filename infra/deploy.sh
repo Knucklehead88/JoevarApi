@@ -20,14 +20,14 @@ umask 077
 params=$(mktemp)
 trap 'rm -f "$params"' EXIT
 
-# The API's Twilio, Email and Google settings come from this machine's user secrets. A new database password is
+# The API's Twilio, Email, Google and Push (VAPID keys) settings come from this machine's user secrets. A new database password is
 # generated on every run; the API's connection string is updated with it.
 dotnet user-secrets list --json | python3 -c '
 import json, secrets, sys
 lines = [line for line in sys.stdin.read().splitlines() if not line.startswith("//")]
 user_secrets = json.loads("\n".join(lines) or "{}")
 api_secrets = {key.replace(":", "__"): value for key, value in user_secrets.items()
-               if key.split(":")[0] in ("Twilio", "Email", "Google")}
+               if key.split(":")[0] in ("Twilio", "Email", "Google", "Push")}
 password = "Jv1-" + secrets.token_urlsafe(24)
 json.dump({
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",

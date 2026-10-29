@@ -83,6 +83,17 @@ public static class KitchenBookingEndpoints
             Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim()
         };
         db.KitchenBookings.Add(booking);
+        if (request.Push is { } push && push.HasKnownPushService())
+        {
+            db.WebPushSubscriptions.Add(new WebPushSubscription
+            {
+                Endpoint = push.Endpoint,
+                P256dh = push.P256dh,
+                Auth = push.Auth,
+                KitchenBookingId = booking.Id
+            });
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         var logger = loggerFactory.CreateLogger("KitchenBooking");
         logger.LogInformation("A kitchen design booking was received.");
@@ -192,6 +203,12 @@ public sealed record KitchenBookingRequest
 
     [MaxLength(4000)]
     public string? Notes { get; init; }
+
+    /// <summary>
+    /// This device's push subscription, when the customer asked to be notified of the decision on this booking. An
+    /// unusable one is ignored rather than refusing the booking.
+    /// </summary>
+    public PushSubscriptionRequest? Push { get; init; }
 }
 
 public sealed record KitchenSelection

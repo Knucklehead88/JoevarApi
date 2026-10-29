@@ -26,8 +26,15 @@ builder.Services.AddSingleton<AppleTokenValidator>();
 builder.Services.AddHttpClient<GoogleTokenValidator>();
 builder.Services.AddHttpClient<UsCityDirectory>();
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+builder.Services.Configure<PushOptions>(builder.Configuration.GetSection(PushOptions.SectionName));
+builder.Services.AddSingleton<PushQueue>();
+builder.Services.AddSingleton<StaffAlertInterceptor>();
+builder.Services.AddHttpClient(nameof(PushSender));
+builder.Services.AddHostedService<PushSender>();
+
+builder.Services.AddDbContext<AppDbContext>((services, options) => options
+    .UseNpgsql(builder.Configuration.GetConnectionString("Default"))
+    .AddInterceptors(services.GetRequiredService<StaffAlertInterceptor>()));
 
 // Staff must have an authenticator app enabled; customers and contractors sign in by phone code, passkey, Apple or Google.
 builder.Services.AddAuthorizationBuilder()
@@ -119,6 +126,7 @@ app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();
 app.MapKitchenBookingStaffEndpoints();
 app.MapVisitorPresenceEndpoints();
+app.MapPushEndpoints();
 app.MapContractorApplicationEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();

@@ -22,6 +22,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
     public DbSet<ContractorApplication> ContractorApplications => Set<ContractorApplication>();
 
+    public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -89,6 +91,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             application.Property(a => a.StreetAddress).HasMaxLength(200);
             application.Property(a => a.ZipCode).HasMaxLength(10);
             application.HasIndex(a => a.CreatedAt);
+        });
+
+        builder.Entity<WebPushSubscription>(subscription =>
+        {
+            subscription.Property(s => s.Endpoint).HasMaxLength(1000);
+            subscription.Property(s => s.P256dh).HasMaxLength(200);
+            subscription.Property(s => s.Auth).HasMaxLength(100);
+            subscription.HasIndex(s => s.Endpoint);
+            subscription.HasOne<AppUser>().WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+            subscription.HasOne<KitchenBooking>().WithMany().HasForeignKey(s => s.KitchenBookingId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<KitchenBooking>(booking =>

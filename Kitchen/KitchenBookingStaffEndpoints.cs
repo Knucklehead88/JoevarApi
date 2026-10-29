@@ -66,6 +66,7 @@ public static class KitchenBookingStaffEndpoints
         ApproveKitchenBookingRequest request,
         AppDbContext db,
         OfficeEmailSender emailSender,
+        PushQueue pushQueue,
         ClaimsPrincipal principal,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -108,6 +109,13 @@ public static class KitchenBookingStaffEndpoints
         booking.DecidedBy = principal.Identity?.Name;
         await db.SaveChangesAsync(cancellationToken);
 
+        var when = $"{booking.AppointmentDate:ddd, MMM d} at {KitchenBookingEndpoints.DisplayTime(booking.AppointmentTime)}";
+        pushQueue.Enqueue(
+            new PushAudience.Booking(booking.Id),
+            requested != (date, time)
+                ? new PushPayload("Your visit was rescheduled", $"Your kitchen design visit is now {when}. Details are in your email.", "/", "booking-decision")
+                : new PushPayload("Your visit is confirmed", $"Your kitchen design visit is confirmed for {when}.", "/", "booking-decision"));
+
         var moved = requested != (date, time)
             ? $"""
 
@@ -145,6 +153,7 @@ public static class KitchenBookingStaffEndpoints
         DeclineKitchenBookingRequest request,
         AppDbContext db,
         OfficeEmailSender emailSender,
+        PushQueue pushQueue,
         ClaimsPrincipal principal,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -164,6 +173,14 @@ public static class KitchenBookingStaffEndpoints
         booking.DecidedAt = DateTimeOffset.UtcNow;
         booking.DecidedBy = principal.Identity?.Name;
         await db.SaveChangesAsync(cancellationToken);
+
+        pushQueue.Enqueue(
+            new PushAudience.Booking(booking.Id),
+            new PushPayload(
+                "About your kitchen design request",
+                "We can't schedule your visit at the time you asked for. Details are in your email.",
+                "/",
+                "booking-decision"));
 
         var message = string.IsNullOrWhiteSpace(request.Message)
             ? Environment.NewLine
