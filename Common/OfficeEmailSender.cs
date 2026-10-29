@@ -1,3 +1,4 @@
+using System.Net;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
@@ -42,13 +43,64 @@ public sealed class OfficeEmailSender(IOptions<EmailOptions> options, ILogger<Of
         message.To.Add(to ?? office);
         message.ReplyTo.Add(replyTo ?? office);
         message.Subject = subject.ReplaceLineEndings(" ").Trim();
-        message.Body = new TextPart("plain") { Text = body };
+        message.Body = BuildBody(body);
 
         using var client = new SmtpClient { Timeout = 15_000 };
         await client.ConnectAsync(settings.Host, settings.Port, SecureSocketOptions.StartTls, cancellationToken);
         await client.AuthenticateAsync(settings.Username!, settings.Password!, cancellationToken);
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    private static readonly byte[] Logo = LoadLogo();
+
+    private static byte[] LoadLogo()
+    {
+        using var stream = typeof(OfficeEmailSender).Assembly.GetManifestResourceStream("joevar-logo.png")
+            ?? throw new InvalidOperationException("The embedded joevar-logo.png is missing.");
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
+    }
+
+    /// <summary>
+    /// The plain text as is, plus an HTML version with the logo on top. The logo is attached inline (cid:) rather
+    /// than linked, so mail apps that block remote images still show it.
+    /// </summary>
+    private static MimeEntity BuildBody(string text)
+    {
+        var builder = new BodyBuilder { TextBody = text };
+        var logo = builder.LinkedResources.Add("joevar-logo.png", Logo, new ContentType("image", "png"));
+        logo.ContentId = MimeKit.Utils.MimeUtils.GenerateMessageId();
+
+        var paragraphs = string.Concat(text.Trim().ReplaceLineEndings("\n").Split("\n\n").Select(paragraph =>
+            $"<p style=\"margin:0 0 16px\">{WebUtility.HtmlEncode(paragraph.Trim('\n')).Replace("\n", "<br>")}</p>"));
+        builder.HtmlBody = $"""
+            <!doctype html>
+            <html>
+            <body style="margin:0;padding:0;background:#f4f6f5">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f5">
+                <tr>
+                  <td align="center" style="padding:24px 12px">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px">
+                      <tr>
+                        <td align="center" style="padding:28px 24px 8px">
+                          <img src="cid:{logo.ContentId}" alt="Joevar" width="76" height="75" style="display:block;border:0">
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:16px 32px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#1f2a24">
+                          {paragraphs}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+            </html>
+            """;
+        return builder.ToMessageBody();
     }
 }
 
@@ -70,7 +122,7 @@ public sealed class EmailOptions
     /// <summary>The From address; defaults to Username (Gmail only allows the mailbox or its aliases).</summary>
     public string? From { get; init; }
 
-    public string FromName { get; init; } = "Joevar website";
+    public string FromName { get; init; } = "Joevar";
 
     /// <summary>Where Contact form messages go, e.g. "office@joevar.com".</summary>
     public string? To { get; init; }

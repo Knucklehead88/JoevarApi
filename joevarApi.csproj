@@ -23,4 +23,8 @@
     <PackageReference Include="Twilio" Version="8.0.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Common/joevar-logo.png" LogicalName="joevar-logo.png" />
+  </ItemGroup>
+
 </Project>

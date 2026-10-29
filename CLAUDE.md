@@ -121,7 +121,9 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 
 - **Email** (`Common/OfficeEmailSender.cs`, MailKit): Contact form messages, kitchen bookings and contractor registrations go out through Gmail SMTP
   (`smtp.gmail.com:587`, STARTTLS) logged in to a Google Workspace mailbox with an **app password**. Settings
-  `Email:Username`/`Password`/`From`/`To` (+ `Host`, `Port`, `FromName`), user secrets locally. Saved first,
+  `Email:Username`/`Password`/`From`/`To` (+ `Host`, `Port`, `FromName`, default "Joevar"), user secrets locally.
+  Every email is sent as plain text plus HTML: the logo on top (`Common/joevar-logo.png`, an embedded resource
+  attached inline as `cid:`, rendered from the frontend's `JoevarLogo` at 2x) and the same text in a white card. Saved first,
   then sent with the visitor as Reply-To; a send failure or missing settings is only logged (the visitor
   still gets 204). `System.Security.Cryptography.Pkcs` is referenced directly to override the vulnerable
   10.0.0 that MailKit pulls in.
