@@ -48,6 +48,8 @@ public static class ContractorApplicationEndpoints
                 application.Professions,
                 application.State,
                 application.City,
+                application.StreetAddress,
+                application.ZipCode,
                 application.Licenses,
                 application.CreatedAt))
             .ToPagedResultAsync(page, pageSize, cancellationToken);
@@ -108,6 +110,8 @@ public static class ContractorApplicationEndpoints
             Professions = request.Professions.Distinct().ToList(),
             State = state!,
             City = city,
+            StreetAddress = request.StreetAddress.Trim(),
+            ZipCode = request.ZipCode.Trim(),
             Licenses = request.Licenses.Distinct().ToList()
         };
         db.ContractorApplications.Add(application);
@@ -129,7 +133,7 @@ public static class ContractorApplicationEndpoints
                 Name:        {application.FullName}
                 Company:     {application.CompanyName ?? "-"}
                 Email:       {application.Email}
-                Location:    {application.City}, {application.State}
+                Address:     {application.StreetAddress}, {application.City}, {application.State} {application.ZipCode}
                 Professions: {professions}
                 Licenses:    {licenses}
 
@@ -156,7 +160,7 @@ public static class ContractorApplicationEndpoints
                 Thank you for registering as a contractor with Joevar. We've received your details and will contact
                 you after reviewing them.
 
-                Location:    {application.City}, {application.State}
+                Address:     {application.StreetAddress}, {application.City}, {application.State} {application.ZipCode}
                 Professions: {professions}
                 Licenses:    {licenses}
 
@@ -183,6 +187,8 @@ public sealed record ContractorApplicationResponse(
     List<ProjectType> Professions,
     string State,
     string City,
+    string StreetAddress,
+    string ZipCode,
     List<string> Licenses,
     DateTimeOffset CreatedAt);
 
@@ -210,6 +216,16 @@ public sealed record ContractorApplicationRequest
     [Required]
     [MaxLength(100)]
     public required string City { get; init; }
+
+    /// <summary>Street and number, e.g. "1114 Circle Ave".</summary>
+    [Required]
+    [MaxLength(200)]
+    public required string StreetAddress { get; init; }
+
+    /// <summary>A US ZIP code, "60130" or "60130-1234".</summary>
+    [Required]
+    [RegularExpression(@"^\s*\d{5}(-\d{4})?\s*$", ErrorMessage = "Enter a 5-digit ZIP code, e.g. 60130.")]
+    public required string ZipCode { get; init; }
 
     [MaxLength(20)]
     public List<string> Licenses { get; init; } = [];

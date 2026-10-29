@@ -86,6 +86,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             application.PrimitiveCollection(a => a.Professions).ElementType().HasConversion<string>();
             application.Property(a => a.State).HasMaxLength(40);
             application.Property(a => a.City).HasMaxLength(100);
+            application.Property(a => a.StreetAddress).HasMaxLength(200);
+            application.Property(a => a.ZipCode).HasMaxLength(10);
             application.HasIndex(a => a.CreatedAt);
         });
 

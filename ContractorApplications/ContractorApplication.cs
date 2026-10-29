@@ -17,6 +17,12 @@ public sealed class ContractorApplication
 
     public required string City { get; set; }
 
+    /// <summary>Street and number, e.g. "1114 Circle Ave".</summary>
+    public required string StreetAddress { get; set; }
+
+    /// <summary>A US ZIP code: "60130" or "60130-1234".</summary>
+    public required string ZipCode { get; set; }
+
     /// <summary>Licenses they hold, from <see cref="ContractorApplicationEndpoints.Licenses"/>.</summary>
     public List<string> Licenses { get; set; } = [];
 
