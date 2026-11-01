@@ -178,12 +178,19 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   instance (with several App Service instances, move it to the database or a cache).
 - `Auth/StaffSeed.cs`: in Development, startup creates the Admins joe, cristi and silviu if missing, with the password
   from the `Seed:StaffPassword` user secret (skipped when it isn't set; existing users untouched).
+- **Profile** (`Auth/ProfileEndpoints.cs`, signed-in user): `PUT /api/auth/me/profile` (name, email), `PUT
+  /api/auth/me/preferences` (`AppUser.DarkTheme`, default true), `POST /api/auth/me/phone/start` + `/verify` (Twilio
+  Verify code to the new number). Email and phone sign customers and contractors in, so changes also go to the linked
+  Customer/Contractor and ContactPhone, a linked login must keep an email, and one on file for someone else gets a 400
+  field error. A changed phone detaches the old `SmsConsents` (`ContactPhoneId` = null; they keep their `PhoneNumber` as
+  proof), so consent doesn't carry over to the new number. A login named after its phone is renamed with it.
 - **Web push** (`Notifications/`, package `Lib.Net.Http.WebPush` 3.3.1, MIT, chosen over `WebPush` because it uses
   .NET's own crypto, not the old Portable.BouncyCastle): VAPID keys in `Push:PublicKey`/`Push:PrivateKey`/`Push:Subject`
   (user secrets; App Service settings via `infra/deploy.sh`; generated 2026-10-29, push is off without them).
-  `WebPushSubscription` rows belong to a staff user (`UserId`, gets the staff alerts) or a kitchen booking
-  (`KitchenBookingId`, gets that booking's decision), cascade-deleted with them. `GET /api/push/public-key` (anyone),
-  `PUT`/`DELETE /api/push/staff-subscription` (staff), and `push` on `KitchenBookingRequest`. Endpoints must be https
+  `WebPushSubscription` rows belong to a user (`UserId`) or a kitchen booking (`KitchenBookingId`), cascade-deleted with
+  them. Staff alerts go only to users with a staff role and 2FA on; a booking's decision goes to its own device and to logins that proved
+  its phone or email (`PhoneNumberConfirmed`/`EmailConfirmed`), never on an unproven match. A device on file twice gets one notification. `GET /api/push/public-key` (anyone),
+  `PUT`/`DELETE /api/push/subscription` (any signed-in user; delete also removes that device's booking subscriptions), and `push` on `KitchenBookingRequest`. Endpoints must be https
   on fcm.googleapis.com, push.services.mozilla.com, push.apple.com or notify.windows.com (no posting to arbitrary
   URLs); an unusable one on a booking is ignored. `StaffAlertInterceptor` (an EF `SaveChangesInterceptor`) queues a
   staff alert whenever a `KitchenBooking`, `ContractorApplication` or `Customer` is added, from any code path (also
