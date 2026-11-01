@@ -40,7 +40,8 @@ public static class CurrentUserEndpoints
             user.ContractorId,
             user.TwoFactorEnabled,
             passkeys.Count,
-            logins.Any(login => login.LoginProvider == AppleLoginEndpoints.LoginProvider)));
+            logins.Any(login => login.LoginProvider == AppleLoginEndpoints.LoginProvider),
+            user.DarkTheme));
     }
 }
 
@@ -59,4 +60,5 @@ public sealed record CurrentUserResponse(
     Guid? ContractorId,
     bool IsTwoFactorEnabled,
     int PasskeyCount,
-    bool IsAppleLinked);
+    bool IsAppleLinked,
+    bool DarkTheme);

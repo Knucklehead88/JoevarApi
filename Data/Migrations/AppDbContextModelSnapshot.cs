@@ -40,6 +40,9 @@ namespace joevarApi.Data.Migrations
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("DarkTheme")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("DisplayName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");

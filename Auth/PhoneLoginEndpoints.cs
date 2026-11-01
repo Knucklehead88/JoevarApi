@@ -152,7 +152,7 @@ public static class PhoneLoginEndpoints
         return phoneTaken || emailTaken ? LoginMatch.Conflict : LoginMatch.New;
     }
 
-    private static async Task<ProblemHttpResult?> SendCodeAsync(string phone, TwilioOptions twilio, ILogger logger)
+    internal static async Task<ProblemHttpResult?> SendCodeAsync(string phone, TwilioOptions twilio, ILogger logger)
     {
         try
         {
@@ -268,7 +268,7 @@ public static class PhoneLoginEndpoints
         return TypedResults.Empty;
     }
 
-    private static bool IsConfigured(TwilioOptions twilio) =>
+    internal static bool IsConfigured(TwilioOptions twilio) =>
         !string.IsNullOrWhiteSpace(twilio.AccountSid) &&
         !string.IsNullOrWhiteSpace(twilio.AuthToken) &&
         !string.IsNullOrWhiteSpace(twilio.VerifyServiceSid);

@@ -5,8 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Web push: the public key browsers subscribe with, and staff devices turning the staff alerts on or off. Customers
-/// subscribe as part of their kitchen booking (<see cref="KitchenBookingRequest.Push"/>).
+/// Web push: the public key browsers subscribe with, and signed-in users turning notifications on or off for a device
+/// (staff hear about new records, customers about their bookings). Anyone can also subscribe as part of a kitchen booking (<see cref="KitchenBookingRequest.Push"/>).
 /// </summary>
 public static class PushEndpoints
 {
@@ -17,15 +17,15 @@ public static class PushEndpoints
             .WithName("GetPushPublicKey")
             .WithSummary("The VAPID public key browsers subscribe with (404 while push is off)");
 
-        var staff = endpoints.MapGroup("/api/push/staff-subscription")
+        var device = endpoints.MapGroup("/api/push/subscription")
             .WithTags("Push")
-            .RequireAuthorization(AuthPolicies.Staff);
-        staff.MapPut("/", SubscribeStaffAsync)
-            .WithName("SubscribeStaffDevice")
-            .WithSummary("Send the staff alerts (new bookings, registrations, customers) to this device");
-        staff.MapDelete("/", UnsubscribeStaffAsync)
-            .WithName("UnsubscribeStaffDevice")
-            .WithSummary("Stop sending the staff alerts to this device");
+            .RequireAuthorization();
+        device.MapPut("/", SubscribeAsync)
+            .WithName("SubscribeDevice")
+            .WithSummary("Send the signed-in user's notifications to this device");
+        device.MapDelete("/", UnsubscribeAsync)
+            .WithName("UnsubscribeDevice")
+            .WithSummary("Stop sending notifications to this device");
 
         return endpoints;
     }
@@ -35,7 +35,7 @@ public static class PushEndpoints
             ? TypedResults.Ok(new PushPublicKeyResponse(options.Value.PublicKey!))
             : TypedResults.NotFound();
 
-    private static async Task<Results<NoContent, ValidationProblem>> SubscribeStaffAsync(
+    private static async Task<Results<NoContent, ValidationProblem>> SubscribeAsync(
         PushSubscriptionRequest request,
         ClaimsPrincipal principal,
         UserManager<AppUser> userManager,
@@ -73,7 +73,7 @@ public static class PushEndpoints
         return TypedResults.NoContent();
     }
 
-    private static async Task<NoContent> UnsubscribeStaffAsync(
+    private static async Task<NoContent> UnsubscribeAsync(
         string endpoint,
         ClaimsPrincipal principal,
         UserManager<AppUser> userManager,
@@ -82,7 +82,8 @@ public static class PushEndpoints
     {
         var userId = userManager.GetUserId(principal)!;
         await db.WebPushSubscriptions
-            .Where(subscription => subscription.UserId == userId && subscription.Endpoint == endpoint)
+            // Also its bookings: off means off. Only this device knows its endpoint, so this can't silence another's.
+            .Where(subscription => subscription.Endpoint == endpoint && (subscription.UserId == userId || subscription.KitchenBookingId != null))
             .ExecuteDeleteAsync(cancellationToken);
         return TypedResults.NoContent();
     }

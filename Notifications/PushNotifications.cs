@@ -88,12 +88,7 @@ public sealed class PushSender(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var subscriptions = audience switch
-        {
-            PushAudience.Staff => db.WebPushSubscriptions.Where(subscription => subscription.UserId != null),
-            PushAudience.Booking booking => db.WebPushSubscriptions.Where(subscription => subscription.KitchenBookingId == booking.KitchenBookingId),
-            _ => db.WebPushSubscriptions.Where(_ => false)
-        };
+        var subscriptions = await SubscribersAsync(db, audience, cancellationToken);
 
         var client = new PushServiceClient(httpClientFactory.CreateClient(nameof(PushSender)))
         {
@@ -102,8 +97,10 @@ public sealed class PushSender(
         var content = JsonSerializer.Serialize(payload, JsonOptions);
         var delivered = 0;
 
-        foreach (var subscription in await subscriptions.ToListAsync(cancellationToken))
+        // A device can be on file twice (its login and a booking): it gets the notification once.
+        foreach (var device in subscriptions.GroupBy(subscription => subscription.Endpoint))
         {
+            var subscription = device.First();
             var target = new PushSubscription { Endpoint = subscription.Endpoint };
             target.SetKey(PushEncryptionKeyName.P256DH, subscription.P256dh);
             target.SetKey(PushEncryptionKeyName.Auth, subscription.Auth);
@@ -118,7 +115,7 @@ public sealed class PushSender(
             catch (PushServiceClientException exception) when (exception.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
             {
                 // The browser unsubscribed (or the subscription expired): stop sending to it.
-                db.WebPushSubscriptions.Remove(subscription);
+                db.WebPushSubscriptions.RemoveRange(device);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -128,6 +125,39 @@ public sealed class PushSender(
 
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Push \"{Title}\" delivered to {Delivered} device(s).", payload.Title, delivered);
+    }
+
+    private static async Task<List<WebPushSubscription>> SubscribersAsync(AppDbContext db, PushAudience audience, CancellationToken cancellationToken)
+    {
+        if (audience is PushAudience.Booking target)
+        {
+            // The device it was booked from, and the customer's signed-in devices: their login must have proven the
+            // phone (texted code) or email (Google) on the booking, since anyone can type those into a booking.
+            var booking = await db.KitchenBookings.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == target.KitchenBookingId, cancellationToken);
+            if (booking is null)
+            {
+                return [];
+            }
+
+            var email = booking.Email.ToUpperInvariant();
+            var owners = db.Users
+                .Where(user => (user.PhoneNumberConfirmed && user.PhoneNumber == booking.Phone) || (user.EmailConfirmed && user.NormalizedEmail == email))
+                .Select(user => user.Id);
+            return await db.WebPushSubscriptions
+                .Where(subscription => subscription.KitchenBookingId == booking.Id || (subscription.UserId != null && owners.Contains(subscription.UserId)))
+                .ToListAsync(cancellationToken);
+        }
+
+        // Only staff with the authenticator on, like the staff pages: customers and contractors can also have devices on file.
+        var staffRoles = new[] { AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant };
+        var staff = from userRole in db.UserRoles
+                    join role in db.Roles on userRole.RoleId equals role.Id
+                    where staffRoles.Contains(role.Name!)
+                    select userRole.UserId;
+        return await db.WebPushSubscriptions
+            .Where(subscription => subscription.UserId != null && staff.Contains(subscription.UserId)
+                && db.Users.Any(user => user.Id == subscription.UserId && user.TwoFactorEnabled))
+            .ToListAsync(cancellationToken);
     }
 }
 

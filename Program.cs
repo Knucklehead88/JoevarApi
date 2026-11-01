@@ -127,6 +127,7 @@ app.MapKitchenBookingEndpoints();
 app.MapKitchenBookingStaffEndpoints();
 app.MapVisitorPresenceEndpoints();
 app.MapPushEndpoints();
+app.MapProfileEndpoints();
 app.MapContractorApplicationEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();
