@@ -79,7 +79,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   `StartsAt`/`EndsAt` timeline, description), `SmsConsent` (opt-in/out history as proof of consent: E.164
   `PhoneNumber`, optional link to a customer's/contractor's `ContactPhone`, wording in `Evidence` +
   `EvidenceVersion`, `SourceUrl`, `IpAddress`, `RecordedAt`; `POST /api/sms/opt-in` records one before texting the
-  confirmation), `Message` (SMS log), `ContractorApplication` (the website's contractor registration: email, full name, company, `Professions` (ProjectType[] stored as text[] of names), `StreetAddress` and `ZipCode` (required, ZIP `12345` or `12345-6789`; rows from before 2026-10-29 have empty values), `State`, `City`, `Licenses` (text[]); public `POST /api/contractor-applications`, shares the contact rate limit; state must be one of the 50 in `UsCityDirectory.States` (no DC), city must be in that state per countriesnow.space (`UsCityDirectory`, typed HttpClient, cached a day per state; accepted as typed when the service is down), licenses one of `ContractorApplicationEndpoints.Licenses`; saved, emailed to the office and acknowledged to the applicant; no endpoint to read them yet), `KitchenBooking` (Kitchen Design page's "Schedule your free blueprint": name, email, E.164 phone, `AppointmentDate` (date), `AppointmentTime` ("09:00"…, slots in `KitchenBookingEndpoints.TimeSlots`), `Selections` (text[] of "Category: Option"), notes; public `POST /api/kitchen-bookings`, date at least 5 days (`LeadDays`) after Chicago's today, shares the contact rate limit, saved then emailed to the office and a "we received your request" copy with the selections to the customer via `OfficeEmailSender.SendToCustomerAsync`, Reply-To the office; `Status` Pending → Approved/Declined with `DecidedAt`/`DecidedBy` (user name), set by the staff endpoints in `Kitchen/KitchenBookingStaffEndpoints.cs`: `GET /api/kitchen-bookings` (status, from/to dates, paging), `POST .../{id}/approve` (optional new date/time; not in the past, LeadDays doesn't apply) and `.../{id}/decline` (optional message), both emailing the customer after saving; 409 when already decided), `ContactMessage` (website Contact form, via the public
+  confirmation), `Message` (SMS log), `ContractorApplication` (the website's contractor registration: email, full name, company, `Professions` (ProjectType[] stored as text[] of names), `StreetAddress` and `ZipCode` (required, ZIP `12345` or `12345-6789`; rows from before 2026-10-29 have empty values), `State`, `City`, `Licenses` (text[]); public `POST /api/contractor-applications`, shares the contact rate limit; state must be one of the 50 in `UsCityDirectory.States` (no DC), city must be in that state per countriesnow.space (`UsCityDirectory`, typed HttpClient, cached a day per state; accepted as typed when the service is down), licenses one of `ContractorApplicationEndpoints.Licenses`; saved, emailed to the office and acknowledged to the applicant; no endpoint to read them yet), `KitchenBooking` (Kitchen Design page's "Schedule your free blueprint": name, email, E.164 phone, the visit's address (`StreetAddress`, `City`, `State`, `ZipCode`, required and checked like contractor registrations; empty on bookings before 2026-11-03; in both emails and the staff list), `AppointmentDate` (date), `AppointmentTime` ("09:00"…, slots in `KitchenBookingEndpoints.TimeSlots`), `Selections` (text[] of "Category: Option"), notes; public `POST /api/kitchen-bookings`, date at least 5 days (`LeadDays`) after Chicago's today, shares the contact rate limit, saved then emailed to the office and a "we received your request" copy with the selections to the customer via `OfficeEmailSender.SendToCustomerAsync`, Reply-To the office; `Status` Pending → Approved/Declined with `DecidedAt`/`DecidedBy` (user name), set by the staff endpoints in `Kitchen/KitchenBookingStaffEndpoints.cs`: `GET /api/kitchen-bookings` (status, from/to dates, paging), `POST .../{id}/approve` (optional new date/time; not in the past, LeadDays doesn't apply) and `.../{id}/decline` (optional message), both emailing the customer after saving; 409 when already decided), `ContactMessage` (website Contact form, via the public
   `POST /api/contact`, rate limited to 5 per hour per IP; saved, then emailed by `OfficeEmailSender`; no
   endpoint to read them yet), `AppUser`
   (optionally linked to a customer/contractor).
@@ -91,30 +91,45 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 - **Staff** (roles Admin, Manager, VA): username + password via Identity's `/api/auth/login`, plus an
   authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
   `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh.
-- **Customers/contractors**: code texted to the phone on file via Twilio Verify (`/api/auth/phone/*`).
-  They must give both their email and phone number. If both belong to the same customer or contractor,
-  they sign in. If neither is on file, a new customer signs up (created after the code is verified, with
-  the email as a placeholder name; contractors are still added by staff). If only one is on file, or they
-  belong to different people, start/verify return 409 `EmailPhoneMismatch` and no code is sent. Their login
-  is created on first use, with `UserName` = E.164 phone, and linked to the matching customer/contractor;
-  each sign-in saves the email they used on the login (`/me` returns it as `email`). They can also
-  use passkeys (`/api/auth/passkey/*`; the challenge is in a cookie, so CORS allows credentials) and Sign in
-  with Apple (`/api/auth/apple`, linked once after a phone login).
-- **Sign in / sign up with Google** (`Auth/GoogleLogin.cs`, `POST /api/auth/google` with `{ accessToken }`
-  from the frontend's GIS token client, `Google:ClientId`). `GoogleTokenValidator` (typed HttpClient) checks
-  the token with Google: `tokeninfo` must show our client ID as `aud`, `userinfo` gives sub/name/email and
-  the email must be verified. **One account per person**, matched in order: the login linked to that Google
-  `sub`; the single login whose `NormalizedEmail` matches; the customer/contractor with that email (their
-  existing login, or a new `google-{sub}` login linked to them); otherwise a new Customer (Google name, email,
-  no phone) and login. Each new match is linked (provider "Google"). Several matches: 409
-  `GoogleEmailAmbiguous`.
-- Phone sign-in reuses a customer's/contractor's existing login (e.g. created by Google) before creating one
-  named after the phone. If the email belongs to a Google-linked login and the phone isn't on file with it,
-  start/verify return 409 `EmailUsesGoogle`: a texted code proves the phone, not the email, so a new phone is
-  never attached to someone's Google account (prevents takeover by typing their email).
-- Note the email saved on a phone login is whatever was typed at sign-in, not verified by us.
-- `/api/auth/register` is blocked (customers sign up through the phone login above). `GET /api/auth/me` returns roles, links and
-  sign-in methods. Public login endpoints are rate limited (`AuthRateLimits`).
+- **Customers/contractors**, any of these (the frontend's `/login`: Phone and Username tabs, then the providers):
+  - **Phone** (`Auth/PhoneLoginEndpoints.cs`, `/api/auth/phone/start` + `/verify`, both `{ name, phone }` (+ `code`)):
+    Twilio Verify texts a code; the code proves the phone, so it signs in whoever has that number on file (their
+    existing login, e.g. created by Google, else a new one with `UserName` = E.164 phone). A number not on file signs
+    up a new customer with that name (contractors are still added by staff). The name is otherwise ignored, except
+    as the login's `DisplayName` when it has none. No email is asked for (until 2026-11-03 it was email + phone).
+  - **Email + password** (`Auth/PasswordSignup.cs`): `POST /api/auth/signup` `{ email, password }` creates a
+    Customer (name = the email until they change it) and a login (`UserName` = the email until they pick one in their
+    profile; Identity's default password rules; an email already on any login/customer/contractor is a 400 field
+    error) and signs in. `POST /api/auth/password/login` `{ email, password }` signs in the one login with that email
+    and a password (Identity's lockout applies); staff accounts get 401 `RequiresTwoFactor` (they use `/api/auth/login`
+    with their username + authenticator). The email isn't verified: it's saved unconfirmed on the login only, **not**
+    on the customer.
+  - **Google** (`Auth/GoogleLogin.cs`, `POST /api/auth/google` `{ accessToken }` from the frontend's GIS token
+    client, `Google:ClientId`). `GoogleTokenValidator` (typed HttpClient) checks it with Google: `tokeninfo` must
+    show our client ID as `aud`, `userinfo` gives sub/name/email, and the email must be verified.
+  - **Microsoft** (`Auth/MicrosoftLogin.cs`, `POST /api/auth/microsoft` `{ idToken }`, `Microsoft:ClientId`):
+    personal and work/school accounts. The frontend gets an ID token in a popup (auth code + PKCE, no library);
+    `MicrosoftTokenValidator` checks the signature (keys from the `common` v2.0 metadata), `aud` = our client ID,
+    lifetime, and that `iss` is the token's own tenant (`tid`). Only personal accounts' emails (tid
+    `9188040d-…`) count as verified; a work/school account's email is set by its org's admin. No nonce check
+    server-side (the frontend checks it). App registration "Joevar web" (client ID
+    `ed5f075c-139f-4ffb-ab63-e799375efdd6`, object ID `f1ce24fa-…`, audience `AzureADandPersonalMicrosoftAccount`,
+    created 2026-11-03 with `az ad app create` in the joevar83@outlook.com directory; SPA redirect URIs
+    `/auth/microsoft.html` on localhost:5173, joevar.com, www.joevar.com and the azurestaticapps.net host).
+  - Passkeys (`/api/auth/passkey/*`; the challenge is in a cookie, so CORS allows credentials) and Sign in with
+    Apple (`/api/auth/apple`, linked once after another sign-in).
+- **One account per person** for Google and Microsoft (`Auth/ExternalAccounts.cs`): the login already linked to
+  that account (`sub`); else, only with a **verified** email: the single login with that email *and*
+  `EmailConfirmed`, then the customer/contractor with that email (their login, or a new `google-{sub}` /
+  `microsoft-{sub}` one); else a new Customer (name, the email only if verified) and login. Each new match is
+  linked (provider "Google"/"Microsoft"). Several matches: 409 `GoogleEmailAmbiguous`/`MicrosoftEmailAmbiguous`.
+  An unverified email that's already on file anywhere: 409 `MicrosoftEmailInUse`. Unverified emails never join an
+  existing account and stay off customer records, so nobody can pre-register someone's email (password sign-up or
+  a work account) and later receive their Google/Microsoft sign-in.
+- Older phone logins still carry the email typed at sign-in back then (unverified, `EmailConfirmed` false).
+- Identity's `/api/auth/register` is blocked. `GET /api/auth/me` returns roles, links and sign-in methods. Public
+  login endpoints (phone, signup, Google, Microsoft, Apple, passkeys) are rate limited (`AuthRateLimits`, 10 per
+  15 minutes per IP); Identity's `/login` relies on its lockout (5 failures).
 - Tokens are Identity's opaque bearer tokens (not JWTs).
 
 ## Integrations
@@ -128,6 +143,8 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   still gets 204). `System.Security.Cryptography.Pkcs` is referenced directly to override the vulnerable
   10.0.0 that MailKit pulls in.
 - **Google**: `Google:ClientId` (user secret locally) = the web client ID from the Google Cloud project; see `Auth/GoogleLogin.cs`.
+- **Microsoft**: `Microsoft:ClientId` (user secret locally; App Service setting via `infra/deploy.sh`) = the app
+  registration's client ID (see Auth above).
 - **Twilio**: inbound SMS webhook `/api/sms/inbound` (signature-validated), opt-in `/api/sms/opt-in`,
   Verify for login codes. US A2P 10DLC registration was rejected once; never message numbers without
   consent (TCPA / carrier rules). Bulk contractor texting must be opt-in only.
@@ -156,7 +173,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   the azurestaticapps.net host until passkeys get a shared parent domain (api.joevar.com needs B1).
 - Created 2026-10-25: API https://joevar-api.azurewebsites.net, site https://calm-meadow-08a1f4310.3.azurestaticapps.net,
   database server `joevar-pg.postgres.database.azure.com`.
-- `infra/deploy.sh` creates or updates them (re-runnable): copies the `Twilio:*`, `Email:*` and `Google:*` user
+- `infra/deploy.sh` creates or updates them (re-runnable): copies the `Twilio:*`, `Email:*`, `Google:*`, `Microsoft:*` and `Push:*` user
   secrets into App Service settings through a private temp file (never printed), generates a new database password
   each run (the connection string follows), and with `gh` signed in sets the GitHub secrets/variables for both repos.
   Bicep replaces all app settings on each run, so add settings there or in the script, not only in the portal.
@@ -178,11 +195,13 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   instance (with several App Service instances, move it to the database or a cache).
 - `Auth/StaffSeed.cs`: in Development, startup creates the Admins joe, cristi and silviu if missing, with the password
   from the `Seed:StaffPassword` user secret (skipped when it isn't set; existing users untouched).
-- **Profile** (`Auth/ProfileEndpoints.cs`, signed-in user): `PUT /api/auth/me/profile` (name, email), `PUT
+- **Profile** (`Auth/ProfileEndpoints.cs`, signed-in user): `PUT /api/auth/me/profile` (name, email, and `userName` for
+  non-staff: 3-50 letters/digits/`._-` starting with a letter, not `google-`/`microsoft-`, unique; omitted = unchanged), `PUT
   /api/auth/me/preferences` (`{ systemTheme?, darkTheme? }`, only the given ones change: `AppUser.SystemTheme`, follow
   the device, default true; `AppUser.DarkTheme`, the picked theme, default true; both in `/me`), `POST /api/auth/me/phone/start` + `/verify` (Twilio
-  Verify code to the new number). Email and phone sign customers and contractors in, so changes also go to the linked
-  Customer/Contractor and ContactPhone, a linked login must keep an email, and one on file for someone else gets a 400
+  Verify code to the new number). Name and phone changes also go to the linked Customer/Contractor and ContactPhone;
+  the email only while it's verified (`EmailConfirmed`; Google/Microsoft matching trusts those records). A linked
+  login must keep an email, and one on file for someone else gets a 400
   field error. A changed phone detaches the old `SmsConsents` (`ContactPhoneId` = null; they keep their `PhoneNumber` as
   proof), so consent doesn't carry over to the new number. A login named after its phone is renamed with it.
 - **Web push** (`Notifications/`, package `Lib.Net.Http.WebPush` 3.3.1, MIT, chosen over `WebPush` because it uses
