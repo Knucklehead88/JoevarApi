@@ -108,6 +108,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             booking.Property(b => b.Name).HasMaxLength(200);
             booking.Property(b => b.Email).HasMaxLength(320);
             booking.Property(b => b.Phone).HasMaxLength(20);
+            booking.Property(b => b.StreetAddress).HasMaxLength(200);
+            booking.Property(b => b.City).HasMaxLength(100);
+            booking.Property(b => b.State).HasMaxLength(40);
+            booking.Property(b => b.ZipCode).HasMaxLength(10);
             booking.Property(b => b.AppointmentTime).HasMaxLength(5);
             booking.Property(b => b.Notes).HasMaxLength(4000);
             booking.Property(b => b.Status).HasConversion<string>().HasMaxLength(20);

@@ -44,6 +44,7 @@ public static class KitchenBookingEndpoints
     private static async Task<Results<NoContent, ValidationProblem>> CreateBookingAsync(
         KitchenBookingRequest request,
         AppDbContext db,
+        UsCityDirectory cities,
         OfficeEmailSender emailSender,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -67,6 +68,26 @@ public static class KitchenBookingEndpoints
             errors["time"] = [$"Choose one of: {string.Join(", ", TimeSlots)}."];
         }
 
+        var state = UsCityDirectory.FindState(request.State);
+        var city = request.City.Trim();
+        if (state is null)
+        {
+            errors["state"] = ["Choose a US state."];
+        }
+        else
+        {
+            // Unknown when the city service is down: accepted as typed rather than refusing the booking.
+            var found = await cities.FindCityAsync(state, city, cancellationToken);
+            if (found == "")
+            {
+                errors["city"] = [$"Choose a city in {state}."];
+            }
+            else if (found is not null)
+            {
+                city = found;
+            }
+        }
+
         if (errors.Count > 0)
         {
             return TypedResults.ValidationProblem(errors);
@@ -77,6 +98,10 @@ public static class KitchenBookingEndpoints
             Name = request.Name.Trim(),
             Email = request.Email.Trim(),
             Phone = phone!,
+            StreetAddress = request.StreetAddress.Trim(),
+            City = city,
+            State = state!,
+            ZipCode = request.ZipCode.Trim(),
             AppointmentDate = request.Date,
             AppointmentTime = request.Time,
             Selections = request.Selections.Select(selection => $"{selection.Category.Trim()}: {selection.Option.Trim()}").ToList(),
@@ -113,6 +138,7 @@ public static class KitchenBookingEndpoints
                 Name:  {booking.Name}
                 Email: {booking.Email}
                 Phone: {booking.Phone}
+                Address: {booking.AddressLine}
 
                 Selections:
                 {selections}
@@ -160,6 +186,7 @@ public static class KitchenBookingEndpoints
             your appointment.
 
             Requested visit: {booking.AppointmentDate:dddd, MMMM d, yyyy} at {time}
+            Address: {booking.AddressLine}
 
             Your selections:
             {selections}
@@ -189,6 +216,25 @@ public sealed record KitchenBookingRequest
     [Required]
     [MaxLength(30)]
     public required string Phone { get; init; }
+
+    /// <summary>Where the visit is: street and number, e.g. "1114 Circle Ave".</summary>
+    [Required]
+    [MaxLength(200)]
+    public required string StreetAddress { get; init; }
+
+    [Required]
+    [MaxLength(100)]
+    public required string City { get; init; }
+
+    /// <summary>A US state's full name, e.g. "Illinois".</summary>
+    [Required]
+    [MaxLength(40)]
+    public required string State { get; init; }
+
+    /// <summary>A US ZIP code, "60130" or "60130-1234".</summary>
+    [Required]
+    [RegularExpression(@"^\s*\d{5}(-\d{4})?\s*$", ErrorMessage = "Enter a 5-digit ZIP code, e.g. 60130.")]
+    public required string ZipCode { get; init; }
 
     /// <summary>The visit date, e.g. "2026-11-03".</summary>
     public required DateOnly Date { get; init; }
