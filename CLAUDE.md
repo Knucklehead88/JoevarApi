@@ -179,7 +179,8 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 - `Auth/StaffSeed.cs`: in Development, startup creates the Admins joe, cristi and silviu if missing, with the password
   from the `Seed:StaffPassword` user secret (skipped when it isn't set; existing users untouched).
 - **Profile** (`Auth/ProfileEndpoints.cs`, signed-in user): `PUT /api/auth/me/profile` (name, email), `PUT
-  /api/auth/me/preferences` (`AppUser.DarkTheme`, default true), `POST /api/auth/me/phone/start` + `/verify` (Twilio
+  /api/auth/me/preferences` (`{ systemTheme?, darkTheme? }`, only the given ones change: `AppUser.SystemTheme`, follow
+  the device, default true; `AppUser.DarkTheme`, the picked theme, default true; both in `/me`), `POST /api/auth/me/phone/start` + `/verify` (Twilio
   Verify code to the new number). Email and phone sign customers and contractors in, so changes also go to the linked
   Customer/Contractor and ContactPhone, a linked login must keep an email, and one on file for someone else gets a 400
   field error. A changed phone detaches the old `SmsConsents` (`ContactPhoneId` = null; they keep their `PhoneNumber` as

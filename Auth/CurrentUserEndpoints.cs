@@ -41,6 +41,7 @@ public static class CurrentUserEndpoints
             user.TwoFactorEnabled,
             passkeys.Count,
             logins.Any(login => login.LoginProvider == AppleLoginEndpoints.LoginProvider),
+            user.SystemTheme,
             user.DarkTheme));
     }
 }
@@ -61,4 +62,5 @@ public sealed record CurrentUserResponse(
     bool IsTwoFactorEnabled,
     int PasskeyCount,
     bool IsAppleLinked,
+    bool SystemTheme,
     bool DarkTheme);

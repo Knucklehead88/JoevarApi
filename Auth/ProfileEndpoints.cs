@@ -100,7 +100,8 @@ public static class ProfileEndpoints
             return TypedResults.Unauthorized();
         }
 
-        user.DarkTheme = request.DarkTheme;
+        user.SystemTheme = request.SystemTheme ?? user.SystemTheme;
+        user.DarkTheme = request.DarkTheme ?? user.DarkTheme;
         await userManager.UpdateAsync(user);
         return TypedResults.NoContent();
     }
@@ -258,9 +259,14 @@ public sealed record UpdateProfileRequest
     public string? Email { get; init; }
 }
 
+/// <summary>Only the values given change.</summary>
 public sealed record UpdatePreferencesRequest
 {
-    public required bool DarkTheme { get; init; }
+    /// <summary>Follow the device's light/dark setting.</summary>
+    public bool? SystemTheme { get; init; }
+
+    /// <summary>The theme used when not following the device.</summary>
+    public bool? DarkTheme { get; init; }
 }
 
 public sealed record StartPhoneChangeRequest

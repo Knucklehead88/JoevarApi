@@ -5,7 +5,10 @@ public sealed class AppUser : IdentityUser
 {
     public string? DisplayName { get; set; }
 
-    /// <summary>The theme in their profile: dark unless they switch it off.</summary>
+    /// <summary>Follow the device's light/dark setting (the default); otherwise <see cref="DarkTheme"/> decides.</summary>
+    public bool SystemTheme { get; set; } = true;
+
+    /// <summary>The theme they picked when not following the device: dark unless they switch it off.</summary>
     public bool DarkTheme { get; set; } = true;
 
     public Guid? CustomerId { get; set; }
