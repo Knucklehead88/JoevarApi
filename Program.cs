@@ -17,6 +17,7 @@ builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(Twili
 builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
 builder.Services.Configure<AppleOptions>(builder.Configuration.GetSection(AppleOptions.SectionName));
 builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
+builder.Services.Configure<MicrosoftOptions>(builder.Configuration.GetSection(MicrosoftOptions.SectionName));
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.AddTransient<OfficeEmailSender>();
 builder.Services.AddSingleton<MondayCustomerCache>();
@@ -24,6 +25,7 @@ builder.Services.AddHttpClient<MondayClient>();
 builder.Services.AddHostedService<MondayRefreshService>();
 builder.Services.AddSingleton<AppleTokenValidator>();
 builder.Services.AddHttpClient<GoogleTokenValidator>();
+builder.Services.AddSingleton<MicrosoftTokenValidator>();
 builder.Services.AddHttpClient<UsCityDirectory>();
 
 builder.Services.Configure<PushOptions>(builder.Configuration.GetSection(PushOptions.SectionName));
@@ -36,7 +38,8 @@ builder.Services.AddDbContext<AppDbContext>((services, options) => options
     .UseNpgsql(builder.Configuration.GetConnectionString("Default"))
     .AddInterceptors(services.GetRequiredService<StaffAlertInterceptor>()));
 
-// Staff must have an authenticator app enabled; customers and contractors sign in by phone code, passkey, Apple or Google.
+// Staff must have an authenticator app enabled; customers and contractors sign in by phone code, password, passkey,
+// Apple, Google or Microsoft.
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy(AuthPolicies.Staff, policy => policy
         .RequireRole(AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant)
@@ -105,7 +108,8 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Accounts are never self-registered: staff are created by an admin, customers and contractors on first phone login.
+// Identity's own /register stays off: staff are created by an admin; customers sign up through /api/auth/signup,
+// a first phone login, Google or Microsoft.
 app.MapGroup("/api/auth")
     .WithTags("Auth")
     .AddEndpointFilter(async (context, next) =>
@@ -117,6 +121,8 @@ app.MapPhoneLoginEndpoints();
 app.MapPasskeyEndpoints();
 app.MapAppleLoginEndpoints();
 app.MapGoogleLoginEndpoints();
+app.MapMicrosoftLoginEndpoints();
+app.MapPasswordSignupEndpoints();
 app.MapAuthenticatorEndpoints();
 app.MapCurrentUserEndpoints();
 app.MapCustomerEndpoints();

@@ -23,7 +23,7 @@ param apiPlanSku string = 'F1'
 param databaseAdminPassword string
 
 @secure()
-@description('API settings from the user secrets (Twilio, Email, Google), as { "Twilio__AccountSid": "..." }.')
+@description('API settings from the user secrets (Twilio, Email, Google, Microsoft, Push), as { "Twilio__AccountSid": "..." }.')
 param apiSecrets object = {}
 
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {

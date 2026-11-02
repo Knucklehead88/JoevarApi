@@ -9,9 +9,8 @@ using Twilio.Exceptions;
 using Twilio.Rest.Verify.V2.Service;
 
 /// <summary>
-/// The signed-in user's own settings. Customers and contractors sign in with the email and phone on their customer or
-/// contractor record, so changes are made there too, or they would lock themselves out. A new phone must be proven with
-/// a texted code, since the phone is what signs them in.
+/// The signed-in user's own settings. Name and phone changes also go to their customer or contractor record, and the
+/// email too once it's verified. A new phone must be proven with a texted code, since the phone signs them in.
 /// </summary>
 public static class ProfileEndpoints
 {
@@ -23,7 +22,7 @@ public static class ProfileEndpoints
 
         group.MapPut("/profile", UpdateProfileAsync)
             .WithName("UpdateProfile")
-            .WithSummary("Change the signed-in user's name and email");
+            .WithSummary("Change the signed-in user's name, email and (customers and contractors) username");
         group.MapPut("/preferences", UpdatePreferencesAsync)
             .WithName("UpdatePreferences")
             .WithSummary("Change the signed-in user's theme");
@@ -63,6 +62,27 @@ public static class ProfileEndpoints
             return FieldError("email", "This email is already on file for someone else.");
         }
 
+        // Staff keep the username they were given (they sign in with it); others may pick one.
+        var userName = request.UserName?.Trim();
+        if (!string.IsNullOrEmpty(userName) && !string.Equals(userName, user.UserName, StringComparison.OrdinalIgnoreCase))
+        {
+            var roles = await userManager.GetRolesAsync(user);
+            if (roles.Any(role => role is AppRoles.Admin or AppRoles.Manager or AppRoles.VirtualAssistant))
+            {
+                return FieldError("userName", "Staff usernames can't be changed here.");
+            }
+
+            // "google-…" and "microsoft-…" are the logins those sign-ins create.
+            if (userName.StartsWith("google-", StringComparison.OrdinalIgnoreCase) ||
+                userName.StartsWith("microsoft-", StringComparison.OrdinalIgnoreCase) ||
+                await userManager.FindByNameAsync(userName) is not null)
+            {
+                return FieldError("userName", "This username is taken. Choose another one.");
+            }
+
+            user.UserName = userName;
+        }
+
         var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim();
         if (!string.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase))
         {
@@ -71,17 +91,26 @@ public static class ProfileEndpoints
 
         user.DisplayName = displayName;
         user.Email = email;
-        await userManager.UpdateAsync(user);
+        var updated = await userManager.UpdateAsync(user);
+        if (!updated.Succeeded)
+        {
+            return TypedResults.ValidationProblem(updated.Errors
+                .GroupBy(error => error.Code.Contains("UserName", StringComparison.Ordinal) ? "userName" : "email")
+                .ToDictionary(group => group.Key, group => group.Select(error => error.Description).ToArray()));
+        }
 
+        // The customer/contractor record gets the email only once it's verified: Google and Microsoft sign-ins trust
+        // the email on these records (ExternalAccounts), so an unverified one there could let someone take an account.
+        var recordEmail = user.EmailConfirmed ? email : null;
         if (await db.Customers.FirstOrDefaultAsync(customer => customer.Id == user.CustomerId, cancellationToken) is { } linkedCustomer)
         {
-            linkedCustomer.Email = email;
+            linkedCustomer.Email = recordEmail ?? linkedCustomer.Email;
             linkedCustomer.Name = displayName ?? linkedCustomer.Name;
         }
 
         if (await db.Contractors.FirstOrDefaultAsync(contractor => contractor.Id == user.ContractorId, cancellationToken) is { } linkedContractor)
         {
-            linkedContractor.Email = email;
+            linkedContractor.Email = recordEmail ?? linkedContractor.Email;
             linkedContractor.Name = displayName ?? linkedContractor.Name;
         }
 
@@ -253,6 +282,14 @@ public sealed record UpdateProfileRequest
 {
     [MaxLength(200)]
     public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Customers and contractors only; leave out to keep it. 3-50 letters, digits, dots, dashes or underscores, starting
+    /// with a letter (so it can't look like a phone login's "+1...").
+    /// </summary>
+    [RegularExpression(@"^\s*[A-Za-z][A-Za-z0-9._-]{2,49}\s*$",
+        ErrorMessage = "Use 3-50 letters, digits, dots, dashes or underscores, starting with a letter.")]
+    public string? UserName { get; init; }
 
     [EmailAddress]
     [MaxLength(256)]

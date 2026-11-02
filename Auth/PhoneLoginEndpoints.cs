@@ -9,10 +9,9 @@ using Twilio.Exceptions;
 using Twilio.Rest.Verify.V2.Service;
 
 /// <summary>
-/// Customers and contractors sign in with a code texted to the phone number on file (Twilio Verify).
-/// They give both their email and that phone number, and both must belong to the same customer or contractor.
-/// An email and phone that are both new sign up a new customer once the code is verified; an email or phone
-/// already on file with something else is refused, so nobody can attach their phone to someone else's account.
+/// Customers and contractors sign in with a code texted to their phone (Twilio Verify): the code proves the phone, so
+/// it signs in whoever has that number on file. A number that isn't on file signs up a new customer with the name
+/// they gave.
 /// </summary>
 public static class PhoneLoginEndpoints
 {
@@ -35,10 +34,8 @@ public static class PhoneLoginEndpoints
 
     private static async Task<Results<Accepted, ValidationProblem, ProblemHttpResult>> StartAsync(
         PhoneLoginStartRequest request,
-        AppDbContext db,
         IOptions<TwilioOptions> twilioOptions,
-        ILoggerFactory loggerFactory,
-        CancellationToken cancellationToken)
+        ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("PhoneLogin");
         var twilio = twilioOptions.Value;
@@ -52,12 +49,6 @@ public static class PhoneLoginEndpoints
         if (phone is null)
         {
             return InvalidPhone();
-        }
-
-        var match = await MatchAsync(db, request.Email, phone, cancellationToken);
-        if (match is LoginMatch.Conflict or LoginMatch.UsesGoogle)
-        {
-            return Conflict(match);
         }
 
         var failure = await SendCodeAsync(phone, twilio, logger);
@@ -90,66 +81,8 @@ public static class PhoneLoginEndpoints
             return InvalidPhone();
         }
 
-        var match = await MatchAsync(db, request.Email, phone, cancellationToken);
-        if (match is LoginMatch.Conflict or LoginMatch.UsesGoogle)
-        {
-            return Conflict(match);
-        }
-
         return await SignInWithCodeAsync(
-            phone, request.Email.Trim(), match == LoginMatch.New, request.Code, db, userManager, signInManager, twilio, loggerFactory.CreateLogger("PhoneLogin"), cancellationToken);
-    }
-
-    private enum LoginMatch
-    {
-        /// <summary>The phone belongs to a customer or contractor with this email.</summary>
-        OnFile,
-
-        /// <summary>Neither the email nor the phone is on file: a new customer signing up.</summary>
-        New,
-
-        /// <summary>The email or the phone is on file, but not together.</summary>
-        Conflict,
-
-        /// <summary>
-        /// The email belongs to a Google sign-in and this phone isn't on file with it. A texted code proves the
-        /// phone, not the email, so it must not be attached to that account: they should use Google.
-        /// </summary>
-        UsesGoogle,
-    }
-
-    /// <summary>How an email and phone relate to the customers and contractors on file (emails ignore case).</summary>
-    private static async Task<LoginMatch> MatchAsync(AppDbContext db, string email, string phone, CancellationToken cancellationToken)
-    {
-        var normalized = email.Trim().ToLowerInvariant();
-        var onFile = await db.ContactPhones.AnyAsync(contactPhone =>
-            contactPhone.Number == phone &&
-            ((contactPhone.Customer != null && contactPhone.Customer.Email != null && contactPhone.Customer.Email.ToLower() == normalized) ||
-             (contactPhone.Contractor != null && contactPhone.Contractor.Email != null && contactPhone.Contractor.Email.ToLower() == normalized)),
-            cancellationToken);
-        if (onFile)
-        {
-            return LoginMatch.OnFile;
-        }
-
-        var phoneTaken = await db.ContactPhones.AnyAsync(contactPhone => contactPhone.Number == phone, cancellationToken);
-        var emailTaken =
-            await db.Customers.AnyAsync(customer => customer.Email != null && customer.Email.ToLower() == normalized, cancellationToken) ||
-            await db.Contractors.AnyAsync(contractor => contractor.Email != null && contractor.Email.ToLower() == normalized, cancellationToken);
-        if (emailTaken && !phoneTaken)
-        {
-            var normalizedUpper = email.Trim().ToUpperInvariant();
-            var usesGoogle = await db.Users.AnyAsync(user =>
-                user.NormalizedEmail == normalizedUpper &&
-                db.UserLogins.Any(login => login.UserId == user.Id && login.LoginProvider == GoogleLoginEndpoints.LoginProvider),
-                cancellationToken);
-            if (usesGoogle)
-            {
-                return LoginMatch.UsesGoogle;
-            }
-        }
-
-        return phoneTaken || emailTaken ? LoginMatch.Conflict : LoginMatch.New;
+            phone, request.Name.Trim(), request.Code, db, userManager, signInManager, twilio, loggerFactory.CreateLogger("PhoneLogin"), cancellationToken);
     }
 
     internal static async Task<ProblemHttpResult?> SendCodeAsync(string phone, TwilioOptions twilio, ILogger logger)
@@ -169,8 +102,7 @@ public static class PhoneLoginEndpoints
 
     private static async Task<Results<EmptyHttpResult, ValidationProblem, UnauthorizedHttpResult, ProblemHttpResult>> SignInWithCodeAsync(
         string phone,
-        string email,
-        bool isNewCustomer,
+        string name,
         string code,
         AppDbContext db,
         UserManager<AppUser> userManager,
@@ -199,26 +131,18 @@ public static class PhoneLoginEndpoints
             return TypedResults.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The login code could not be checked.");
         }
 
-        if (isNewCustomer)
-        {
-            // Self sign-up: the verified code proves they own the phone. Staff can add their name later.
-            db.Customers.Add(new Customer
-            {
-                Name = email,
-                Email = email,
-                Phone = new ContactPhone { Number = phone }
-            });
-            await db.SaveChangesAsync(cancellationToken);
-            logger.LogInformation("A new customer signed up by phone.");
-        }
-
         var owners = await db.ContactPhones
             .Where(contactPhone => contactPhone.Number == phone)
             .Select(contactPhone => new { contactPhone.CustomerId, contactPhone.ContractorId })
             .ToListAsync(cancellationToken);
         if (owners.Count == 0)
         {
-            return TypedResults.Unauthorized();
+            // Self sign-up: the verified code proves they own the phone.
+            var customer = new Customer { Name = name, Phone = new ContactPhone { Number = phone } };
+            db.Customers.Add(customer);
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("A new customer signed up by phone.");
+            owners = [new { CustomerId = (Guid?)customer.Id, ContractorId = (Guid?)null }];
         }
 
         // One login per person: the one for this phone, else the one the customer/contractor already has (e.g.
@@ -243,8 +167,8 @@ public static class PhoneLoginEndpoints
 
         user.PhoneNumber = phone;
         user.PhoneNumberConfirmed = true;
-        // The email they signed in with, so the app can greet them by it instead of the phone number.
-        user.Email = email;
+        // The name they gave, unless the login already has one, so the app greets them by it, not by the number.
+        user.DisplayName ??= name;
         foreach (var owner in owners)
         {
             if (owner.CustomerId is not null)
@@ -273,17 +197,6 @@ public static class PhoneLoginEndpoints
         !string.IsNullOrWhiteSpace(twilio.AuthToken) &&
         !string.IsNullOrWhiteSpace(twilio.VerifyServiceSid);
 
-    private static ProblemHttpResult Conflict(LoginMatch match) =>
-        match == LoginMatch.UsesGoogle
-            ? TypedResults.Problem(
-                statusCode: StatusCodes.Status409Conflict,
-                title: "This email signs in with Google.",
-                detail: "EmailUsesGoogle")
-            : TypedResults.Problem(
-                statusCode: StatusCodes.Status409Conflict,
-                title: "This email or phone number is already on file with different details.",
-                detail: "EmailPhoneMismatch");
-
     private static ProblemHttpResult NotConfigured() =>
         TypedResults.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Phone login is not configured.");
 
@@ -304,10 +217,10 @@ public static class PhoneLoginEndpoints
 
 public sealed record PhoneLoginStartRequest
 {
+    /// <summary>Used when the number isn't on file yet, to sign up a new customer.</summary>
     [Required]
-    [EmailAddress]
-    [MaxLength(256)]
-    public required string Email { get; init; }
+    [MaxLength(200)]
+    public required string Name { get; init; }
 
     [Required]
     [MaxLength(30)]
@@ -316,10 +229,10 @@ public sealed record PhoneLoginStartRequest
 
 public sealed record PhoneLoginVerifyRequest
 {
+    /// <summary>Used when the number isn't on file yet, to sign up a new customer.</summary>
     [Required]
-    [EmailAddress]
-    [MaxLength(256)]
-    public required string Email { get; init; }
+    [MaxLength(200)]
+    public required string Name { get; init; }
 
     [Required]
     [MaxLength(30)]

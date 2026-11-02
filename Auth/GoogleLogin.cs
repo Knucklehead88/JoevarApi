@@ -8,9 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Sign in (and sign up) with Google for customers and contractors. One account per person: the Google account
-/// is matched, in order, to a login already linked to it, a login with the same email, a customer/contractor
-/// with the same email (whose login is created), and only then a new customer is created (without a phone).
+/// Sign in (and sign up) with Google for customers and contractors: the login already linked to the Google account,
+/// else one found or created by <see cref="ExternalAccounts"/> (one account per person).
 /// </summary>
 public static class GoogleLoginEndpoints
 {
@@ -37,142 +36,17 @@ public static class GoogleLoginEndpoints
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
-        var logger = loggerFactory.CreateLogger("GoogleLogin");
         var google = await validator.ValidateAsync(request.AccessToken, cancellationToken);
         if (google is null)
         {
             return TypedResults.Unauthorized();
         }
 
-        var user = await userManager.FindByLoginAsync(LoginProvider, google.Subject);
-        if (user is null)
-        {
-            var found = await FindOrCreateUserAsync(google, db, userManager, logger, cancellationToken);
-            if (found.Problem is not null)
-            {
-                return found.Problem;
-            }
-
-            user = found.User!;
-            var linked = await userManager.AddLoginAsync(user, new UserLoginInfo(LoginProvider, google.Subject, LoginProvider));
-            if (!linked.Succeeded)
-            {
-                logger.LogError("Could not link a Google account: {Errors}", string.Join("; ", linked.Errors.Select(error => error.Description)));
-                return TypedResults.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The Google account could not be linked.");
-            }
-        }
-
-        signInManager.AuthenticationScheme = IdentityConstants.BearerScheme;
-        await signInManager.SignInAsync(user, isPersistent: false, authenticationMethod: LoginProvider);
-        return TypedResults.Empty;
+        // Google only gives us verified emails (see GoogleTokenValidator).
+        return await ExternalAccounts.SignInAsync(
+            new ExternalAccounts.ExternalIdentity(LoginProvider, google.Subject, google.Email, EmailVerified: true, google.Name),
+            db, userManager, signInManager, loggerFactory.CreateLogger("GoogleLogin"), cancellationToken);
     }
-
-    private sealed record FoundUser(AppUser? User, ProblemHttpResult? Problem);
-
-    private static async Task<FoundUser> FindOrCreateUserAsync(
-        GoogleIdentity google,
-        AppDbContext db,
-        UserManager<AppUser> userManager,
-        ILogger logger,
-        CancellationToken cancellationToken)
-    {
-        // 1. A login (from an earlier email + phone sign-in) with the same email.
-        var normalizedEmail = userManager.NormalizeEmail(google.Email);
-        var users = await userManager.Users
-            .Where(candidate => candidate.NormalizedEmail == normalizedEmail)
-            .Take(2)
-            .ToListAsync(cancellationToken);
-        if (users.Count > 1)
-        {
-            return new FoundUser(null, Ambiguous());
-        }
-
-        if (users.Count == 1)
-        {
-            return new FoundUser(users[0], null);
-        }
-
-        // 2. A customer or contractor with that email (e.g. added by staff): their login, or a new one for them.
-        var email = google.Email.Trim().ToLowerInvariant();
-        var customerIds = await db.Customers
-            .Where(customer => customer.Email != null && customer.Email.ToLower() == email)
-            .Select(customer => customer.Id)
-            .Take(2)
-            .ToListAsync(cancellationToken);
-        var contractorIds = await db.Contractors
-            .Where(contractor => contractor.Email != null && contractor.Email.ToLower() == email)
-            .Select(contractor => contractor.Id)
-            .Take(2)
-            .ToListAsync(cancellationToken);
-        if (customerIds.Count > 1 || contractorIds.Count > 1)
-        {
-            return new FoundUser(null, Ambiguous());
-        }
-
-        Guid? customerId = customerIds.Count == 1 ? customerIds[0] : null;
-        Guid? contractorId = contractorIds.Count == 1 ? contractorIds[0] : null;
-
-        if (customerId is not null || contractorId is not null)
-        {
-            var linkedUsers = await userManager.Users
-                .Where(candidate => (customerId != null && candidate.CustomerId == customerId) ||
-                                    (contractorId != null && candidate.ContractorId == contractorId))
-                .Take(2)
-                .ToListAsync(cancellationToken);
-            if (linkedUsers.Count > 1)
-            {
-                return new FoundUser(null, Ambiguous());
-            }
-
-            if (linkedUsers.Count == 1)
-            {
-                return new FoundUser(linkedUsers[0], null);
-            }
-        }
-        else
-        {
-            // 3. Nobody with this email yet: a new customer signs up (no phone; staff can add one).
-            var customer = new Customer { Name = google.Name ?? google.Email, Email = google.Email };
-            db.Customers.Add(customer);
-            await db.SaveChangesAsync(cancellationToken);
-            customerId = customer.Id;
-            logger.LogInformation("A new customer signed up with Google.");
-        }
-
-        var user = new AppUser
-        {
-            UserName = $"google-{google.Subject}",
-            Email = google.Email,
-            EmailConfirmed = true,
-            DisplayName = google.Name,
-            CustomerId = customerId,
-            ContractorId = contractorId
-        };
-        var created = await userManager.CreateAsync(user);
-        if (!created.Succeeded)
-        {
-            logger.LogError("Could not create a login for a Google account: {Errors}", string.Join("; ", created.Errors.Select(error => error.Description)));
-            return new FoundUser(null, TypedResults.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The login could not be created."));
-        }
-
-        if (customerId is not null)
-        {
-            await userManager.AddToRoleAsync(user, AppRoles.Customer);
-        }
-
-        if (contractorId is not null)
-        {
-            await userManager.AddToRoleAsync(user, AppRoles.Contractor);
-        }
-
-        return new FoundUser(user, null);
-    }
-
-    private static ProblemHttpResult Ambiguous() =>
-        TypedResults.Problem(
-            statusCode: StatusCodes.Status409Conflict,
-            title: "This email belongs to more than one account.",
-            detail: "GoogleEmailAmbiguous");
 }
 
 /// <summary>A verified Google account: its stable ID ("sub"), verified email and display name.</summary>

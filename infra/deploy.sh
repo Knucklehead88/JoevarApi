@@ -20,14 +20,14 @@ umask 077
 params=$(mktemp)
 trap 'rm -f "$params"' EXIT
 
-# The API's Twilio, Email, Google and Push (VAPID keys) settings come from this machine's user secrets. A new database password is
+# The API's Twilio, Email, Google, Microsoft and Push (VAPID keys) settings come from this machine's user secrets. A new database password is
 # generated on every run; the API's connection string is updated with it.
 dotnet user-secrets list --json | python3 -c '
 import json, secrets, sys
 lines = [line for line in sys.stdin.read().splitlines() if not line.startswith("//")]
 user_secrets = json.loads("\n".join(lines) or "{}")
 api_secrets = {key.replace(":", "__"): value for key, value in user_secrets.items()
-               if key.split(":")[0] in ("Twilio", "Email", "Google", "Push")}
+               if key.split(":")[0] in ("Twilio", "Email", "Google", "Microsoft", "Push")}
 password = "Jv1-" + secrets.token_urlsafe(24)
 json.dump({
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
@@ -59,10 +59,14 @@ web_url=$(sed -n 2p <<< "$outputs")
 echo "API:     $api_url"
 echo "Website: $web_url"
 
-google_client_id=$(dotnet user-secrets list --json | python3 -c '
+user_secret() {
+  dotnet user-secrets list --json | python3 -c '
 import json, sys
 lines = [line for line in sys.stdin.read().splitlines() if not line.startswith("//")]
-print(json.loads("\n".join(lines) or "{}").get("Google:ClientId", ""))')
+print(json.loads("\n".join(lines) or "{}").get(sys.argv[1], ""))' "$1"
+}
+google_client_id=$(user_secret Google:ClientId)
+microsoft_client_id=$(user_secret Microsoft:ClientId)
 
 if command -v gh > /dev/null && gh auth status > /dev/null 2>&1; then
   echo "Connecting GitHub Actions..."
@@ -73,6 +77,7 @@ if command -v gh > /dev/null && gh auth status > /dev/null 2>&1; then
     | gh secret set AZURE_STATIC_WEB_APPS_API_TOKEN --repo "$web_repo"
   gh variable set API_BASE_URL --repo "$web_repo" --body "$api_url"
   gh variable set GOOGLE_CLIENT_ID --repo "$web_repo" --body "$google_client_id"
+  gh variable set MICROSOFT_CLIENT_ID --repo "$web_repo" --body "$microsoft_client_id"
   echo "Done. Push (or re-run the workflows) to deploy."
 else
   cat <<EOF
@@ -83,5 +88,6 @@ gh isn't signed in, so set these in GitHub (Settings > Secrets and variables > A
   $web_repo  secret   AZURE_STATIC_WEB_APPS_API_TOKEN  = output of: az staticwebapp secrets list -g $group -n $web_name --query properties.apiKey -o tsv
   $web_repo  variable API_BASE_URL                     = $api_url
   $web_repo  variable GOOGLE_CLIENT_ID                 = $google_client_id
+  $web_repo  variable MICROSOFT_CLIENT_ID              = $microsoft_client_id
 EOF
 fi
