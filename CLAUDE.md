@@ -92,8 +92,15 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
   `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh. The `Admin`
   policy is the same with the Admin role only.
+- **Crew** (role added 2026-11-05, migration `AddCustomerProjects` seeds it): a staff role (in `StaffAccounts.Roles`:
+  username + password + authenticator, blockable, excluded from `/api/users`) but not office (`StaffAccounts.OfficeRoles`
+  = Admin, Manager, VA, which the `Staff` policy and office push alerts use). The `ProjectTeam` policy (every staff role +
+  2FA) covers the customer project endpoints; Crew only see projects they own, contribute to or are assigned on
+  (`Projects/ProjectAccess.cs`).
 - **Staff management** (`Users/StaffEndpoints.cs`, `/api/staff`, Admin policy): list, add (username, display name,
-  optional email, role, first password; they set up the authenticator at first sign-in), block, unblock, delete.
+  optional email, role (incl. Crew), optional phone + `smsConsent`, first password; they set up the authenticator at
+  first sign-in), `PUT /{id}/phone` `{ phone?, smsConsent }` (stored in `AppUser.PhoneNumber`, unconfirmed; it isn't a
+  sign-in method: phone login only matches customer/contractor `ContactPhones`), block, unblock, delete.
   Nobody can block/delete themselves or the last unblocked Admin (409 with the reason). **Blocking**
   (`Users/StaffAccounts.cs`): lockout until `BlockedUntil` (9999-01-01; `DateTimeOffset.MaxValue` isn't stored as is
   by PostgreSQL), a new security stamp (refresh tokens fail), and `UseBlockedLoginCheck` (between authentication and
@@ -141,6 +148,30 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   login endpoints (phone, signup, Google, Microsoft, Apple, passkeys) are rate limited (`AuthRateLimits`, 10 per
   15 minutes per IP); Identity's `/login` relies on its lockout (5 failures).
 - Tokens are Identity's opaque bearer tokens (not JWTs).
+
+## Customer projects (`Projects/`)
+
+- Entities: `Project` (+ `OwnerId`, `Contributors` many-to-many → table `ProjectContributors`, `Items`, `Activity`,
+  `LastActivityAt`), `ProjectItem` (`Work`, `Type` ProjectType, `Status` NotStarted/WorkingOnIt/Stuck/Done, `Assignees`
+  → `ProjectItemAssignees`), `ProjectActivity` (the feed and chat: `Kind` Change/Message/Sms, `AuthorUserId`
+  (SetNull), `AuthorName` snapshot, `FromCustomer`, `Text`, `Texted`/`NotTexted` text[]), `AppUser.NotificationsSeenAt`.
+- Endpoints: `ProjectEndpoints.cs` (list/get for the team; create/update/team/delete office-only; the customer is the
+  picked one, else matched by phone then email, else new; `customerTexts` records staff-attested consent),
+  `ProjectItemEndpoints.cs`, `ProjectChatEndpoints.cs` (activity, messages, mentions, notifications). Contract details are
+  in joevarWeb's CLAUDE.md ("Customer projects").
+- `ProjectFeed` (scoped) is the one place changes and messages go through: saves the entry, bumps `LastActivityAt`,
+  texts (customer: new/removed items, item and project status; @mentions: team, office staff, customer), and queues a
+  push (`PushAudience.Users`) to the team and the mentioned, not the author. `SmsSender` (scoped) texts only numbers
+  whose latest `SmsConsent` is an opt-in, logs each text in `Messages` with its `ProjectId` (so a reply finds its
+  project), and returns a reason instead of throwing ("texting isn't set up", "hasn't agreed to texts", "replied STOP
+  to texts" for Twilio 21610).
+- `/api/sms/inbound` now works without monday.com: it logs the text in `Messages` (deduplicated by `MessageSid`, since
+  Twilio retries), records STOP/START keywords as consent, posts it into a project chat (`ProjectFeed.ReceiveSmsAsync`),
+  and only then does the monday.com logging/forwarding when monday is configured. Production needs
+  `Twilio:InboundWebhookUrl` (`https://joevar-api.azurewebsites.net/api/sms/inbound`) and the Twilio number's webhook
+  pointed there.
+- Gotcha: EF can't translate a helper method that returns an `IQueryable` (`SmsSender.LatestConsent`) inside a
+  `Select` projection; the consent subquery is inlined there.
 
 ## Integrations
 
