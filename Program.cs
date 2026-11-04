@@ -43,6 +43,9 @@ builder.Services.AddDbContext<AppDbContext>((services, options) => options
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy(AuthPolicies.Staff, policy => policy
         .RequireRole(AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant)
+        .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"))
+    .AddPolicy(AuthPolicies.Admin, policy => policy
+        .RequireRole(AppRoles.Admin)
         .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"));
 
 // Bearer-token login endpoints for the Vue frontend (login, refresh, 2FA, ...).
@@ -106,6 +109,7 @@ app.UseHttpsRedirection();
 app.UseCors("Frontend");
 app.UseRateLimiter();
 app.UseAuthentication();
+app.UseBlockedLoginCheck();
 app.UseAuthorization();
 
 // Identity's own /register stays off: staff are created by an admin; customers sign up through /api/auth/signup,
@@ -134,6 +138,8 @@ app.MapKitchenBookingStaffEndpoints();
 app.MapVisitorPresenceEndpoints();
 app.MapPushEndpoints();
 app.MapProfileEndpoints();
+app.MapUserEndpoints();
+app.MapStaffEndpoints();
 app.MapContractorApplicationEndpoints();
 app.MapSmsOptInEndpoints();
 app.MapSmsInboundEndpoints();

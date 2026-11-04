@@ -148,7 +148,7 @@ public sealed class PushSender(
                 .ToListAsync(cancellationToken);
         }
 
-        // Only staff with the authenticator on, like the staff pages: customers and contractors can also have devices on file.
+        // Only staff with the authenticator on and not blocked, like the staff pages: customers and contractors can also have devices on file.
         var staffRoles = new[] { AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant };
         var staff = from userRole in db.UserRoles
                     join role in db.Roles on userRole.RoleId equals role.Id
@@ -156,7 +156,8 @@ public sealed class PushSender(
                     select userRole.UserId;
         return await db.WebPushSubscriptions
             .Where(subscription => subscription.UserId != null && staff.Contains(subscription.UserId)
-                && db.Users.Any(user => user.Id == subscription.UserId && user.TwoFactorEnabled))
+                && db.Users.Any(user => user.Id == subscription.UserId && user.TwoFactorEnabled
+                    && (user.LockoutEnd == null || user.LockoutEnd < StaffAccounts.BlockedUntil)))
             .ToListAsync(cancellationToken);
     }
 }

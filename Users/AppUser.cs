@@ -5,6 +5,9 @@ public sealed class AppUser : IdentityUser
 {
     public string? DisplayName { get; set; }
 
+    /// <summary>When the login was created; empty for logins made before 2026-11-04, when this was added.</summary>
+    public DateTimeOffset? CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
     /// <summary>Follow the device's light/dark setting (the default); otherwise <see cref="DarkTheme"/> decides.</summary>
     public bool SystemTheme { get; set; } = true;
 

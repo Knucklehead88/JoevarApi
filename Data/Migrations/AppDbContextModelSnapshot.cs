@@ -37,6 +37,9 @@ namespace joevarApi.Data.Migrations
                     b.Property<Guid?>("ContractorId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uuid");
 
