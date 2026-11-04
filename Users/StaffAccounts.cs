@@ -8,7 +8,11 @@ using Microsoft.EntityFrameworkCore;
 /// </summary>
 public static class StaffAccounts
 {
-    public static readonly string[] Roles = [AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant];
+    /// <summary>Every staff role, highest first. They all sign in with a username, password and authenticator.</summary>
+    public static readonly string[] Roles = [AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant, AppRoles.Crew];
+
+    /// <summary>The office: staff who use every staff page. Crew only get the customer projects they're on.</summary>
+    public static readonly string[] OfficeRoles = [AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant];
 
     /// <summary>
     /// Far enough ahead to mean "until unblocked", and unlike <see cref="DateTimeOffset.MaxValue"/> stored as is by

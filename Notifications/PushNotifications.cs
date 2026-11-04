@@ -25,12 +25,15 @@ public sealed class PushOptions
 /// <summary>What a notification shows, and the page a click opens (on joevar.com).</summary>
 public sealed record PushPayload(string Title, string Body, string Url, string Tag);
 
-/// <summary>Who a notification is for: every staff device, or the devices that booked one visit.</summary>
+/// <summary>Who a notification is for: every office staff device, the devices that booked one visit, or some staff logins.</summary>
 public abstract record PushAudience
 {
     public sealed record Staff : PushAudience;
 
     public sealed record Booking(Guid KitchenBookingId) : PushAudience;
+
+    /// <summary>These staff logins' devices (a project's team), when not blocked and with the authenticator on.</summary>
+    public sealed record Users(IReadOnlyCollection<string> UserIds) : PushAudience;
 }
 
 /// <summary>
@@ -148,12 +151,19 @@ public sealed class PushSender(
                 .ToListAsync(cancellationToken);
         }
 
-        // Only staff with the authenticator on and not blocked, like the staff pages: customers and contractors can also have devices on file.
-        var staffRoles = new[] { AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant };
+        // Only staff with the authenticator on and not blocked, like the staff pages: customers and contractors can also
+        // have devices on file. Office alerts (bookings, registrations) skip Crew.
+        var staffRoles = audience is PushAudience.Users ? StaffAccounts.Roles : StaffAccounts.OfficeRoles;
         var staff = from userRole in db.UserRoles
                     join role in db.Roles on userRole.RoleId equals role.Id
                     where staffRoles.Contains(role.Name!)
                     select userRole.UserId;
+        if (audience is PushAudience.Users users)
+        {
+            var ids = users.UserIds.ToList();
+            staff = staff.Where(id => ids.Contains(id));
+        }
+
         return await db.WebPushSubscriptions
             .Where(subscription => subscription.UserId != null && staff.Contains(subscription.UserId)
                 && db.Users.Any(user => user.Id == subscription.UserId && user.TwoFactorEnabled

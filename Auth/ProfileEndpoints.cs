@@ -67,7 +67,7 @@ public static class ProfileEndpoints
         if (!string.IsNullOrEmpty(userName) && !string.Equals(userName, user.UserName, StringComparison.OrdinalIgnoreCase))
         {
             var roles = await userManager.GetRolesAsync(user);
-            if (roles.Any(role => role is AppRoles.Admin or AppRoles.Manager or AppRoles.VirtualAssistant))
+            if (roles.Any(StaffAccounts.Roles.Contains))
             {
                 return FieldError("userName", "Staff usernames can't be changed here.");
             }

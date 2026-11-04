@@ -20,6 +20,7 @@ public static class StaffEndpoints
         group.MapPost("/", CreateStaffAsync).WithName("CreateStaff").WithSummary("Add a staff login");
         group.MapPost("/{id}/block", BlockStaffAsync).WithName("BlockStaff").WithSummary("Block a staff login and sign it out");
         group.MapPost("/{id}/unblock", UnblockStaffAsync).WithName("UnblockStaff").WithSummary("Let a blocked staff login sign in again");
+        group.MapPut("/{id}/phone", UpdateStaffPhoneAsync).WithName("UpdateStaffPhone").WithSummary("Set a staff login's phone for project texts");
         group.MapDelete("/{id}", DeleteStaffAsync).WithName("DeleteStaff").WithSummary("Delete a staff login");
 
         return endpoints;
@@ -39,9 +40,11 @@ public static class StaffEndpoints
             .ToListAsync(cancellationToken);
 
         var me = userManager.GetUserId(principal);
+        var phones = rows.Select(row => row.User.PhoneNumber).OfType<string>().Distinct().ToList();
+        var optedIn = await OptedInAsync(db, phones, cancellationToken);
         var staff = rows
             .GroupBy(row => row.User.Id)
-            .Select(logins => ToResponse(logins.First().User, HighestRole(logins.Select(row => row.Role)), me))
+            .Select(logins => ToResponse(logins.First().User, HighestRole(logins.Select(row => row.Role)), me, optedIn))
             .OrderBy(member => member.DisplayName ?? member.UserName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return TypedResults.Ok(staff);
@@ -50,7 +53,9 @@ public static class StaffEndpoints
     private static async Task<Results<Created<StaffResponse>, ValidationProblem>> CreateStaffAsync(
         CreateStaffRequest request,
         ClaimsPrincipal principal,
-        UserManager<AppUser> userManager)
+        UserManager<AppUser> userManager,
+        SmsSender sms,
+        CancellationToken cancellationToken)
     {
         if (!StaffAccounts.Roles.Contains(request.Role))
         {
@@ -60,11 +65,17 @@ public static class StaffEndpoints
             });
         }
 
+        if (PhoneProblem(request.Phone, request.SmsConsent, out var phone) is { } phoneProblem)
+        {
+            return phoneProblem;
+        }
+
         var user = new AppUser
         {
             UserName = request.UserName.Trim(),
             DisplayName = request.DisplayName.Trim(),
-            Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim()
+            Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim(),
+            PhoneNumber = phone
         };
         var result = await userManager.CreateAsync(user, request.Password);
         if (result.Succeeded)
@@ -89,7 +100,78 @@ public static class StaffEndpoints
             return TypedResults.ValidationProblem(errors);
         }
 
-        return TypedResults.Created($"/api/staff/{user.Id}", ToResponse(user, request.Role, userManager.GetUserId(principal)));
+        var me = userManager.GetUserId(principal);
+        if (phone is not null && request.SmsConsent
+            && await sms.RecordStaffConsentAsync(phone, true, (await userManager.GetUserAsync(principal))!.UserName!, cancellationToken))
+        {
+            await sms.SendOptInConfirmationAsync(phone, cancellationToken);
+        }
+
+        return TypedResults.Created($"/api/staff/{user.Id}", ToResponse(user, request.Role, me, phone is not null && request.SmsConsent ? [phone] : []));
+    }
+
+    /// <summary>
+    /// The phone project texts go to (@mentions in the chat), and whether they agreed to texts. It isn't a sign-in
+    /// method: staff always sign in with their username and authenticator.
+    /// </summary>
+    private static async Task<Results<Ok<StaffResponse>, NotFound, ValidationProblem>> UpdateStaffPhoneAsync(
+        string id,
+        StaffPhoneRequest request,
+        ClaimsPrincipal principal,
+        UserManager<AppUser> userManager,
+        AppDbContext db,
+        SmsSender sms,
+        CancellationToken cancellationToken)
+    {
+        var user = await userManager.FindByIdAsync(id);
+        var role = user is null ? null : StaffRole(await userManager.GetRolesAsync(user));
+        if (user is null || role is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (PhoneProblem(request.Phone, request.SmsConsent, out var phone) is { } problem)
+        {
+            return problem;
+        }
+
+        user.PhoneNumber = phone;
+        user.PhoneNumberConfirmed = false;
+        await userManager.UpdateAsync(user);
+        var admin = (await userManager.GetUserAsync(principal))!.UserName!;
+        if (phone is not null && await sms.RecordStaffConsentAsync(phone, request.SmsConsent, admin, cancellationToken))
+        {
+            await sms.SendOptInConfirmationAsync(phone, cancellationToken);
+        }
+
+        var optedIn = await OptedInAsync(db, phone is null ? [] : [phone], cancellationToken);
+        return TypedResults.Ok(ToResponse(user, role, userManager.GetUserId(principal), optedIn));
+    }
+
+    private static ValidationProblem? PhoneProblem(string? input, bool consent, out string? phone)
+    {
+        phone = PhoneNumbers.Normalize(input);
+        if (!string.IsNullOrWhiteSpace(input) && phone is null)
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["phone"] = ["Enter a valid phone number, e.g. (773) 555-0100."] });
+        }
+
+        if (consent && phone is null)
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["phone"] = ["Add the phone number to text."] });
+        }
+
+        return null;
+    }
+
+    private static async Task<HashSet<string>> OptedInAsync(AppDbContext db, List<string> phones, CancellationToken cancellationToken)
+    {
+        var latest = await db.SmsConsents
+            .Where(consent => phones.Contains(consent.PhoneNumber))
+            .GroupBy(consent => consent.PhoneNumber)
+            .Select(group => new { Phone = group.Key, Status = group.OrderByDescending(consent => consent.RecordedAt).Select(consent => consent.Status).First() })
+            .ToListAsync(cancellationToken);
+        return latest.Where(row => row.Status == SmsConsentStatus.OptedIn).Select(row => row.Phone).ToHashSet();
     }
 
     private static async Task<Results<Ok<StaffResponse>, NotFound, Conflict<string>>> BlockStaffAsync(
@@ -112,7 +194,7 @@ public static class StaffEndpoints
         await userManager.SetLockoutEndDateAsync(user, StaffAccounts.BlockedUntil);
         // Refresh tokens carry the old stamp, so they stop working.
         await userManager.UpdateSecurityStampAsync(user);
-        return TypedResults.Ok(ToResponse(user, role!, userManager.GetUserId(principal)));
+        return TypedResults.Ok(ToResponse(user, role!, userManager.GetUserId(principal), []));
     }
 
     private static async Task<Results<Ok<StaffResponse>, NotFound>> UnblockStaffAsync(
@@ -129,7 +211,7 @@ public static class StaffEndpoints
 
         await userManager.SetLockoutEndDateAsync(user, null);
         await userManager.ResetAccessFailedCountAsync(user);
-        return TypedResults.Ok(ToResponse(user, role, userManager.GetUserId(principal)));
+        return TypedResults.Ok(ToResponse(user, role, userManager.GetUserId(principal), []));
     }
 
     private static async Task<Results<NoContent, NotFound, Conflict<string>>> DeleteStaffAsync(
@@ -192,15 +274,17 @@ public static class StaffEndpoints
         return staffRoles.Count == 0 ? null : HighestRole(staffRoles);
     }
 
-    /// <summary>Admin, else Manager, else VA (<see cref="StaffAccounts.Roles"/> is in that order).</summary>
+    /// <summary>Admin, else Manager, else VA, else Crew (<see cref="StaffAccounts.Roles"/> is in that order).</summary>
     private static string HighestRole(IEnumerable<string> roles) =>
         StaffAccounts.Roles.First(roles.Contains);
 
-    private static StaffResponse ToResponse(AppUser user, string role, string? me) => new(
+    private static StaffResponse ToResponse(AppUser user, string role, string? me, IReadOnlyCollection<string> optedIn) => new(
         user.Id,
         user.UserName!,
         user.DisplayName,
         user.Email,
+        user.PhoneNumber,
+        user.PhoneNumber is not null && optedIn.Contains(user.PhoneNumber),
         role,
         user.TwoFactorEnabled,
         StaffAccounts.IsBlocked(user),
@@ -222,9 +306,16 @@ public sealed record CreateStaffRequest
     [MaxLength(256)]
     public string? Email { get; init; }
 
-    /// <summary>Admin, Manager or VA.</summary>
+    /// <summary>Admin, Manager, VA or Crew (Crew only see the customer projects they're on).</summary>
     [Required]
     public required string Role { get; init; }
+
+    /// <summary>For project texts (@mentions); any common format.</summary>
+    [MaxLength(30)]
+    public string? Phone { get; init; }
+
+    /// <summary>They agreed to receive texts from Joevar (recorded as consent).</summary>
+    public bool SmsConsent { get; init; }
 
     /// <summary>The first password; they sign in with it and set up the authenticator.</summary>
     [Required]
@@ -232,12 +323,25 @@ public sealed record CreateStaffRequest
     public required string Password { get; init; }
 }
 
-/// <summary>A staff login. <see cref="IsYou"/> marks the Admin asking, who can't block or delete themselves.</summary>
+public sealed record StaffPhoneRequest
+{
+    [MaxLength(30)]
+    public string? Phone { get; init; }
+
+    public bool SmsConsent { get; init; }
+}
+
+/// <summary>
+/// A staff login. <see cref="IsYou"/> marks the Admin asking, who can't block or delete themselves.
+/// <see cref="CanText"/>: a phone with an opt-in on record, so project @mentions are texted to them.
+/// </summary>
 public sealed record StaffResponse(
     string Id,
     string UserName,
     string? DisplayName,
     string? Email,
+    string? Phone,
+    bool CanText,
     string Role,
     bool IsTwoFactorEnabled,
     bool IsBlocked,

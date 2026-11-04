@@ -8,6 +8,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
     public DbSet<Project> Projects => Set<Project>();
 
+    public DbSet<ProjectItem> ProjectItems => Set<ProjectItem>();
+
+    public DbSet<ProjectActivity> ProjectActivity => Set<ProjectActivity>();
+
     public DbSet<Contractor> Contractors => Set<Contractor>();
 
     public DbSet<ContactPhone> ContactPhones => Set<ContactPhone>();
@@ -41,9 +45,33 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             project.Property(p => p.Status).HasConversion<string>().HasMaxLength(20);
             project.PrimitiveCollection(p => p.Types).ElementType().HasConversion<string>();
             project.HasOne(p => p.Customer).WithMany(c => c.Projects).OnDelete(DeleteBehavior.Restrict);
+            project.HasOne(p => p.Owner).WithMany().HasForeignKey(p => p.OwnerId).OnDelete(DeleteBehavior.SetNull);
+            project.HasMany(p => p.Contributors).WithMany().UsingEntity(join => join.ToTable("ProjectContributors"));
+            project.HasIndex(p => p.LastActivityAt);
             project.ToTable(table => table.HasCheckConstraint(
                 "CK_Projects_Timeline",
                 "\"EndsAt\" IS NULL OR \"StartsAt\" IS NULL OR \"EndsAt\" >= \"StartsAt\""));
+        });
+
+        builder.Entity<ProjectItem>(item =>
+        {
+            item.Property(i => i.Work).HasMaxLength(500);
+            item.Property(i => i.Type).HasConversion<string>().HasMaxLength(20);
+            item.Property(i => i.Status).HasConversion<string>().HasMaxLength(20);
+            item.HasOne(i => i.Project).WithMany(p => p.Items).OnDelete(DeleteBehavior.Cascade);
+            item.HasMany(i => i.Assignees).WithMany().UsingEntity(join => join.ToTable("ProjectItemAssignees"));
+            item.HasIndex(i => new { i.ProjectId, i.CreatedAt });
+        });
+
+        builder.Entity<ProjectActivity>(activity =>
+        {
+            activity.Property(a => a.Kind).HasConversion<string>().HasMaxLength(20);
+            activity.Property(a => a.AuthorName).HasMaxLength(200);
+            activity.Property(a => a.Text).HasMaxLength(4000);
+            activity.HasOne(a => a.Project).WithMany(p => p.Activity).OnDelete(DeleteBehavior.Cascade);
+            activity.HasOne<AppUser>().WithMany().HasForeignKey(a => a.AuthorUserId).OnDelete(DeleteBehavior.SetNull);
+            activity.HasIndex(a => new { a.ProjectId, a.CreatedAt });
+            activity.HasIndex(a => a.CreatedAt);
         });
 
         builder.Entity<Contractor>(contractor =>

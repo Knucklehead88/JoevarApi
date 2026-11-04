@@ -14,6 +14,9 @@ public sealed class AppUser : IdentityUser
     /// <summary>The theme they picked when not following the device: dark unless they switch it off.</summary>
     public bool DarkTheme { get; set; } = true;
 
+    /// <summary>Staff: when they last opened their notifications (project activity after it is unread).</summary>
+    public DateTimeOffset? NotificationsSeenAt { get; set; }
+
     public Guid? CustomerId { get; set; }
 
     public Customer? Customer { get; set; }

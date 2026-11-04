@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Twilio;
@@ -14,7 +15,7 @@ public static class SmsInboundEndpoints
     {
         endpoints.MapPost("/api/sms/inbound", ReceiveSmsAsync)
             .WithName("ReceiveInboundSms")
-            .WithSummary("Log an inbound SMS to monday.com")
+            .WithSummary("Post an inbound SMS in its project's chat (and log it to monday.com when that's set up)")
             .Accepts<IFormCollection>("application/x-www-form-urlencoded")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
@@ -28,6 +29,8 @@ public static class SmsInboundEndpoints
         HttpRequest request,
         IOptions<TwilioOptions> twilioOptions,
         MondayClient monday,
+        AppDbContext db,
+        ProjectFeed feed,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -36,10 +39,9 @@ public static class SmsInboundEndpoints
         if (string.IsNullOrWhiteSpace(twilio.AccountSid) ||
             string.IsNullOrWhiteSpace(twilio.AuthToken) ||
             string.IsNullOrWhiteSpace(twilio.InboundWebhookUrl) ||
-            string.IsNullOrWhiteSpace(twilio.FromPhoneNumber) ||
-            !monday.IsConfigured)
+            string.IsNullOrWhiteSpace(twilio.FromPhoneNumber))
         {
-            logger.LogError("Inbound SMS settings (Twilio or Monday.com) are not fully configured.");
+            logger.LogError("Inbound SMS settings (Twilio) are not fully configured.");
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Inbound SMS logging is not configured.");
@@ -78,6 +80,44 @@ public static class SmsInboundEndpoints
             {
                 logText.Append($"{Environment.NewLine}📎 {form[$"MediaUrl{index}"]}");
             }
+        }
+
+        // Twilio retries a webhook that failed; a text already logged is answered without posting it twice.
+        if (await db.Messages.AnyAsync(message => message.TwilioSid == messageSid, cancellationToken))
+        {
+            return Results.Content(EmptyTwiml, "application/xml");
+        }
+
+        db.Messages.Add(new Message
+        {
+            Direction = MessageDirection.Inbound,
+            From = sender.Length > 20 ? sender[..20] : sender,
+            To = twilio.FromPhoneNumber.Length > 20 ? twilio.FromPhoneNumber[..20] : twilio.FromPhoneNumber,
+            Body = logText.ToString(),
+            TwilioSid = messageSid,
+            Status = "received"
+        });
+        await db.SaveChangesAsync(cancellationToken);
+
+        // The project chat: a reply from a team member or a customer goes to the project it answers.
+        var inProjectChat = false;
+        try
+        {
+            inProjectChat = await feed.ReceiveSmsAsync(sender, logText.ToString(), cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(exception, "Failed to post inbound SMS {MessageSid} in a project chat.", messageSid);
+        }
+
+        if (!monday.IsConfigured)
+        {
+            if (!inProjectChat)
+            {
+                logger.LogWarning("Inbound SMS {MessageSid} is from a number that is on no project.", messageSid);
+            }
+
+            return Results.Content(EmptyTwiml, "application/xml");
         }
 
         var fromForwardingNumber = string.Equals(sender, twilio.ForwardToPhoneNumber, StringComparison.Ordinal);

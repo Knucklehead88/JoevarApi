@@ -27,6 +27,8 @@ builder.Services.AddSingleton<AppleTokenValidator>();
 builder.Services.AddHttpClient<GoogleTokenValidator>();
 builder.Services.AddSingleton<MicrosoftTokenValidator>();
 builder.Services.AddHttpClient<UsCityDirectory>();
+builder.Services.AddScoped<SmsSender>();
+builder.Services.AddScoped<ProjectFeed>();
 
 builder.Services.Configure<PushOptions>(builder.Configuration.GetSection(PushOptions.SectionName));
 builder.Services.AddSingleton<PushQueue>();
@@ -42,7 +44,10 @@ builder.Services.AddDbContext<AppDbContext>((services, options) => options
 // Apple, Google or Microsoft.
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy(AuthPolicies.Staff, policy => policy
-        .RequireRole(AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant)
+        .RequireRole(StaffAccounts.OfficeRoles)
+        .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"))
+    .AddPolicy(AuthPolicies.ProjectTeam, policy => policy
+        .RequireRole(StaffAccounts.Roles)
         .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"))
     .AddPolicy(AuthPolicies.Admin, policy => policy
         .RequireRole(AppRoles.Admin)
@@ -131,6 +136,8 @@ app.MapAuthenticatorEndpoints();
 app.MapCurrentUserEndpoints();
 app.MapCustomerEndpoints();
 app.MapProjectEndpoints();
+app.MapProjectItemEndpoints();
+app.MapProjectChatEndpoints();
 app.MapContractorEndpoints();
 app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();

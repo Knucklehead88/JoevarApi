@@ -71,6 +71,9 @@ namespace joevarApi.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<DateTimeOffset?>("NotificationsSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("PasswordHash")
                         .HasColumnType("text");
 
@@ -108,6 +111,36 @@ namespace joevarApi.Data.Migrations
                         .HasDatabaseName("UserNameIndex");
 
                     b.ToTable("AspNetUsers", (string)null);
+                });
+
+            modelBuilder.Entity("AppUserProject", b =>
+                {
+                    b.Property<string>("ContributorsId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ContributorsId", "ProjectId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("ProjectContributors", (string)null);
+                });
+
+            modelBuilder.Entity("AppUserProjectItem", b =>
+                {
+                    b.Property<string>("AssigneesId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ProjectItemId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("AssigneesId", "ProjectItemId");
+
+                    b.HasIndex("ProjectItemId");
+
+                    b.ToTable("ProjectItemAssignees", (string)null);
                 });
 
             modelBuilder.Entity("ContactMessage", b =>
@@ -479,6 +512,13 @@ namespace joevarApi.Data.Migrations
                         },
                         new
                         {
+                            Id = "role-crew",
+                            ConcurrencyStamp = "role-crew",
+                            Name = "Crew",
+                            NormalizedName = "CREW"
+                        },
+                        new
+                        {
                             Id = "role-contractor",
                             ConcurrencyStamp = "role-contractor",
                             Name = "Contractor",
@@ -642,10 +682,16 @@ namespace joevarApi.Data.Migrations
                     b.Property<DateTimeOffset?>("EndsAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<string>("OwnerId")
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("StartsAt")
                         .HasColumnType("timestamp with time zone");
@@ -663,10 +709,103 @@ namespace joevarApi.Data.Migrations
 
                     b.HasIndex("CustomerId");
 
+                    b.HasIndex("LastActivityAt");
+
+                    b.HasIndex("OwnerId");
+
                     b.ToTable("Projects", t =>
                         {
                             t.HasCheckConstraint("CK_Projects_Timeline", "\"EndsAt\" IS NULL OR \"StartsAt\" IS NULL OR \"EndsAt\" >= \"StartsAt\"");
                         });
+                });
+
+            modelBuilder.Entity("ProjectActivity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("AuthorUserId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("FromCustomer")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.PrimitiveCollection<List<string>>("NotTexted")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.PrimitiveCollection<List<string>>("Texted")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.ToTable("ProjectActivity");
+                });
+
+            modelBuilder.Entity("ProjectItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Work")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.ToTable("ProjectItems");
                 });
 
             modelBuilder.Entity("SmsConsent", b =>
@@ -777,6 +916,36 @@ namespace joevarApi.Data.Migrations
                     b.Navigation("Contractor");
 
                     b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("AppUserProject", b =>
+                {
+                    b.HasOne("AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AppUserProjectItem", b =>
+                {
+                    b.HasOne("AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("AssigneesId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ProjectItem", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ContactPhone", b =>
@@ -923,7 +1092,41 @@ namespace joevarApi.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("AppUser", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Customer");
+
+                    b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("ProjectActivity", b =>
+                {
+                    b.HasOne("AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Project", "Project")
+                        .WithMany("Activity")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("ProjectItem", b =>
+                {
+                    b.HasOne("Project", "Project")
+                        .WithMany("Items")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("SmsConsent", b =>
@@ -964,6 +1167,13 @@ namespace joevarApi.Data.Migrations
                     b.Navigation("Phone");
 
                     b.Navigation("Projects");
+                });
+
+            modelBuilder.Entity("Project", b =>
+                {
+                    b.Navigation("Activity");
+
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }
