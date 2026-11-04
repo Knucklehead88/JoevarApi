@@ -90,7 +90,17 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 
 - **Staff** (roles Admin, Manager, VA): username + password via Identity's `/api/auth/login`, plus an
   authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
-  `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh.
+  `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh. The `Admin`
+  policy is the same with the Admin role only.
+- **Staff management** (`Users/StaffEndpoints.cs`, `/api/staff`, Admin policy): list, add (username, display name,
+  optional email, role, first password; they set up the authenticator at first sign-in), block, unblock, delete.
+  Nobody can block/delete themselves or the last unblocked Admin (409 with the reason). **Blocking**
+  (`Users/StaffAccounts.cs`): lockout until `BlockedUntil` (9999-01-01; `DateTimeOffset.MaxValue` isn't stored as is
+  by PostgreSQL), a new security stamp (refresh tokens fail), and `UseBlockedLoginCheck` (between authentication and
+  authorization) which makes requests from a blocked or deleted login anonymous, so its access token stops working at
+  once (one indexed lookup per authenticated request). `PushSender` skips blocked staff.
+- **Users list** (`Users/UserEndpoints.cs`, `GET /api/users`, Staff policy): logins without a staff role, newest
+  first by `AppUser.CreatedAt` (added 2026-11-04, set in code for new logins; older ones are `null`).
 - **Customers/contractors**, any of these (the frontend's `/login`: Phone and Username tabs, then the providers):
   - **Phone** (`Auth/PhoneLoginEndpoints.cs`, `/api/auth/phone/start` + `/verify`, both `{ name, phone }` (+ `code`)):
     Twilio Verify texts a code; the code proves the phone, so it signs in whoever has that number on file (their
@@ -223,7 +233,8 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 - Gotcha: `dotnet ef migrations add` gives a new non-null string column (like `KitchenBookings.Status`) a default of
   `""`, which breaks reading existing rows as an enum; set the migration's `defaultValue` (here `"Pending"`).
 - A staff endpoint to list Contact form messages (they're emailed and saved, but not readable in the app).
-- Staff management endpoints (for now: `create-admin` per person); customer/contractor portal endpoints.
+- Changing a staff member's role or resetting their password/authenticator (for now: delete and add again);
+  customer/contractor portal endpoints.
 - Sync between the database and monday.com (the database becomes the system of record).
 - Apple sign-in doesn't check a nonce yet. Changing a customer's phone doesn't revoke existing
   passkeys/Apple links.
