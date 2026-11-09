@@ -20,6 +20,7 @@ public static class StaffEndpoints
         group.MapPost("/", CreateStaffAsync).WithName("CreateStaff").WithSummary("Add a staff login");
         group.MapPost("/{id}/block", BlockStaffAsync).WithName("BlockStaff").WithSummary("Block a staff login and sign it out");
         group.MapPost("/{id}/unblock", UnblockStaffAsync).WithName("UnblockStaff").WithSummary("Let a blocked staff login sign in again");
+        group.MapPost("/{id}/reset-authenticator", ResetAuthenticatorAsync).WithName("ResetStaffAuthenticator").WithSummary("Turn off a staff login's authenticator so they set it up again");
         group.MapPut("/{id}/phone", UpdateStaffPhoneAsync).WithName("UpdateStaffPhone").WithSummary("Set a staff login's phone for project texts");
         group.MapDelete("/{id}", DeleteStaffAsync).WithName("DeleteStaff").WithSummary("Delete a staff login");
 
@@ -195,6 +196,42 @@ public static class StaffEndpoints
         // Refresh tokens carry the old stamp, so they stop working.
         await userManager.UpdateSecurityStampAsync(user);
         return TypedResults.Ok(ToResponse(user, role!, userManager.GetUserId(principal), []));
+    }
+
+    /// <summary>
+    /// For a lost phone or an authenticator whose codes stopped working: a new key, two-factor off, the old recovery
+    /// codes gone, signed out everywhere (new security stamp), and a wrong-code lockout lifted (a block stays). They
+    /// sign in with their password and land on the authenticator setup, which shows new recovery codes.
+    /// </summary>
+    private static async Task<Results<Ok<StaffResponse>, NotFound, Conflict<string>>> ResetAuthenticatorAsync(
+        string id,
+        ClaimsPrincipal principal,
+        UserManager<AppUser> userManager)
+    {
+        var user = await userManager.FindByIdAsync(id);
+        var role = user is null ? null : StaffRole(await userManager.GetRolesAsync(user));
+        if (user is null || role is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (user.Id == userManager.GetUserId(principal))
+        {
+            return TypedResults.Conflict("You can't reset your own authenticator; ask another Admin.");
+        }
+
+        await userManager.SetTwoFactorEnabledAsync(user, false);
+        // Also renews the security stamp, so their sessions (refresh tokens) end.
+        await userManager.ResetAuthenticatorKeyAsync(user);
+        // Zero codes: the old ones stop working, and setup issues new ones (it only does when none are left).
+        await userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 0);
+        if (!StaffAccounts.IsBlocked(user))
+        {
+            await userManager.SetLockoutEndDateAsync(user, null);
+        }
+
+        await userManager.ResetAccessFailedCountAsync(user);
+        return TypedResults.Ok(ToResponse(user, role, userManager.GetUserId(principal), []));
     }
 
     private static async Task<Results<Ok<StaffResponse>, NotFound>> UnblockStaffAsync(
