@@ -111,7 +111,7 @@ public sealed class PushSender(
             {
                 await client.RequestPushMessageDeliveryAsync(
                     target,
-                    new PushMessage(content) { Topic = payload.Tag, Urgency = PushMessageUrgency.High, TimeToLive = 86400 },
+                    new PushMessage(content) { Topic = Topic(payload.Tag), Urgency = PushMessageUrgency.High, TimeToLive = 86400 },
                     cancellationToken);
                 delivered++;
             }
@@ -129,6 +129,14 @@ public sealed class PushSender(
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Push \"{Title}\" delivered to {Delivered} device(s).", payload.Title, delivered);
     }
+
+    /// <summary>
+    /// The Topic header (a newer push with the same topic replaces an undelivered one) may be at most 32 URL-safe
+    /// base64 characters (RFC 8030); push services reject longer ones, e.g. "project-{guid}". So it's a hash of the tag.
+    /// </summary>
+    private static string Topic(string tag) =>
+        Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tag)))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_')[..32];
 
     private static async Task<List<WebPushSubscription>> SubscribersAsync(AppDbContext db, PushAudience audience, CancellationToken cancellationToken)
     {
