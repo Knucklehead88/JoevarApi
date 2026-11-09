@@ -92,6 +92,8 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
   `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh. The `Admin`
   policy is the same with the Admin role only.
+- **Push topics:** `PushSender` sends `Topic` as a 32-character SHA-256 hash of the tag: RFC 8030 caps it at 32
+  URL-safe characters and push services reject longer ones (project tags `project-{guid}` were 44).
 - **Crew** (role added 2026-11-05, migration `AddCustomerProjects` seeds it): a staff role (in `StaffAccounts.Roles`:
   username + password + authenticator, blockable, excluded from `/api/users`) but not office (`StaffAccounts.OfficeRoles`
   = Admin, Manager, VA, which the `Staff` policy and office push alerts use). The `ProjectTeam` policy (every staff role +
@@ -100,7 +102,10 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 - **Staff management** (`Users/StaffEndpoints.cs`, `/api/staff`, Admin policy): list, add (username, display name,
   optional email, role (incl. Crew), optional phone + `smsConsent`, first password; they set up the authenticator at
   first sign-in), `PUT /{id}/phone` `{ phone?, smsConsent }` (stored in `AppUser.PhoneNumber`, unconfirmed; it isn't a
-  sign-in method: phone login only matches customer/contractor `ContactPhones`), block, unblock, delete.
+  sign-in method: phone login only matches customer/contractor `ContactPhones`), block, unblock, delete, and
+  `POST /{id}/reset-authenticator` (two-factor off, `ResetAuthenticatorKeyAsync` (new key and security stamp, so
+  refresh tokens fail), `GenerateNewTwoFactorRecoveryCodesAsync(user, 0)` so the old codes stop working and setup
+  issues new ones, lockout lifted unless blocked; not on yourself, 409).
   Nobody can block/delete themselves or the last unblocked Admin (409 with the reason). **Blocking**
   (`Users/StaffAccounts.cs`): lockout until `BlockedUntil` (9999-01-01; `DateTimeOffset.MaxValue` isn't stored as is
   by PostgreSQL), a new security stamp (refresh tokens fail), and `UseBlockedLoginCheck` (between authentication and
@@ -264,7 +269,8 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 - Gotcha: `dotnet ef migrations add` gives a new non-null string column (like `KitchenBookings.Status`) a default of
   `""`, which breaks reading existing rows as an enum; set the migration's `defaultValue` (here `"Pending"`).
 - A staff endpoint to list Contact form messages (they're emailed and saved, but not readable in the app).
-- Changing a staff member's role or resetting their password/authenticator (for now: delete and add again);
+- Changing a staff member's role or resetting their password (for now: delete and add again; the authenticator has
+  its own reset, see Staff management above);
   customer/contractor portal endpoints.
 - Sync between the database and monday.com (the database becomes the system of record).
 - Apple sign-in doesn't check a nonce yet. Changing a customer's phone doesn't revoke existing
