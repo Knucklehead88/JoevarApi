@@ -83,6 +83,15 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   `POST /api/contact`, rate limited to 5 per hour per IP; saved, then emailed by `OfficeEmailSender`; no
   endpoint to read them yet), `AppUser`
   (optionally linked to a customer/contractor).
+- `BathroomRequest` (`Bathroom/`, 2026-11-09; the Bathroom Remodel page's questionnaire): package key + name +
+  starting price at the time (`BathroomPackages`, keep in step with the frontend's `bathroomPackages.ts`; "custom" has
+  no price), contact and address (checked like kitchen bookings), `LengthFeet`/`WidthFeet` (numeric(5,1)), `Timeline`
+  (one of `BathroomPackages.Timelines`), `Goals` (required for custom), and `BathroomRequestPhotos` (bytea; the browser
+  shrinks them to 1600 px JPEG; type checked by magic bytes, ≤ 8, ≤ 3 MB each). Public `POST /api/bathroom-requests`
+  (JSON, photos base64), contact rate limit; saved, emailed to the office with the photos attached
+  (`OfficeEmailSender.SendAsync(..., attachments)`, `EmailAttachment`) and a summary to the customer; staff push via
+  `StaffAlertInterceptor`. Staff read them with `GET /api/bathroom-requests` (paged, newest first, photo ids and names)
+  and `GET /api/bathroom-requests/{id}/photos/{photoId}` (the bytes), in `Bathroom/BathroomRequestStaffEndpoints.cs`.
 - `ProjectType` is shared by project types and contractor trades. Enums are stored as text and lists as
   `text[]`.
 
