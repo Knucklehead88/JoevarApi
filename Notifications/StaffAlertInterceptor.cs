@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
 /// <summary>
-/// Notifies staff devices when a new kitchen booking, contractor registration or customer is saved, wherever in the
+/// Notifies staff devices when a new kitchen booking, bathroom request, contractor registration or customer is saved, wherever in the
 /// code it happens (website forms, phone or Google sign-up). The alert is queued only once the save succeeded.
 /// </summary>
 public sealed class StaffAlertInterceptor(PushQueue queue) : SaveChangesInterceptor
@@ -69,6 +69,11 @@ public sealed class StaffAlertInterceptor(PushQueue queue) : SaveChangesIntercep
                     $"{application.FullName}, {application.City}, {application.State}",
                     "/dashboard",
                     "new-contractor"),
+                BathroomRequest bathroom => new PushPayload(
+                    "New bathroom project request",
+                    $"{bathroom.Name}: {bathroom.PackageName}, {bathroom.City}, {bathroom.State}",
+                    "/dashboard",
+                    "new-bathroom"),
                 Customer customer => new PushPayload("New customer sign-up", customer.Name, "/dashboard", "new-customer"),
                 _ => null
             })

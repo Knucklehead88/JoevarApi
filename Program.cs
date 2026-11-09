@@ -141,6 +141,8 @@ app.MapProjectChatEndpoints();
 app.MapContractorEndpoints();
 app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();
+app.MapBathroomRequestEndpoints();
+app.MapBathroomRequestStaffEndpoints();
 app.MapKitchenBookingStaffEndpoints();
 app.MapVisitorPresenceEndpoints();
 app.MapPushEndpoints();

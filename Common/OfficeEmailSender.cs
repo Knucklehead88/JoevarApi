@@ -17,9 +17,15 @@ public sealed class OfficeEmailSender(IOptions<EmailOptions> options, ILogger<Of
         !string.IsNullOrWhiteSpace(options.Value.Password) &&
         !string.IsNullOrWhiteSpace(options.Value.To);
 
-    /// <summary>An email to the office; replying answers the visitor.</summary>
-    public Task SendAsync(string subject, string body, string replyToName, string replyToEmail, CancellationToken cancellationToken) =>
-        SendCoreAsync(null, subject, body, new MailboxAddress(replyToName, replyToEmail), cancellationToken);
+    /// <summary>An email to the office; replying answers the visitor. <paramref name="attachments"/>: e.g. photos.</summary>
+    public Task SendAsync(
+        string subject,
+        string body,
+        string replyToName,
+        string replyToEmail,
+        CancellationToken cancellationToken,
+        IReadOnlyList<EmailAttachment>? attachments = null) =>
+        SendCoreAsync(null, subject, body, new MailboxAddress(replyToName, replyToEmail), cancellationToken, attachments);
 
     /// <summary>An email to a customer (e.g. a booking confirmation); replying reaches the office.</summary>
     public Task SendToCustomerAsync(string name, string email, string subject, string body, CancellationToken cancellationToken) =>
@@ -27,7 +33,13 @@ public sealed class OfficeEmailSender(IOptions<EmailOptions> options, ILogger<Of
 
     /// <param name="to">The recipient, or null for the office (Email:To).</param>
     /// <param name="replyTo">Who replies go to, or null for the office.</param>
-    private async Task SendCoreAsync(MailboxAddress? to, string subject, string body, MailboxAddress? replyTo, CancellationToken cancellationToken)
+    private async Task SendCoreAsync(
+        MailboxAddress? to,
+        string subject,
+        string body,
+        MailboxAddress? replyTo,
+        CancellationToken cancellationToken,
+        IReadOnlyList<EmailAttachment>? attachments = null)
     {
         var settings = options.Value;
         if (!IsConfigured)
@@ -43,7 +55,7 @@ public sealed class OfficeEmailSender(IOptions<EmailOptions> options, ILogger<Of
         message.To.Add(to ?? office);
         message.ReplyTo.Add(replyTo ?? office);
         message.Subject = subject.ReplaceLineEndings(" ").Trim();
-        message.Body = BuildBody(body);
+        message.Body = BuildBody(body, attachments ?? []);
 
         using var client = new SmtpClient { Timeout = 15_000 };
         await client.ConnectAsync(settings.Host, settings.Port, SecureSocketOptions.StartTls, cancellationToken);
@@ -67,9 +79,14 @@ public sealed class OfficeEmailSender(IOptions<EmailOptions> options, ILogger<Of
     /// The plain text as is, plus an HTML version with the logo on top. The logo is attached inline (cid:) rather
     /// than linked, so mail apps that block remote images still show it.
     /// </summary>
-    private static MimeEntity BuildBody(string text)
+    private static MimeEntity BuildBody(string text, IReadOnlyList<EmailAttachment> attachments)
     {
         var builder = new BodyBuilder { TextBody = text };
+        foreach (var attachment in attachments)
+        {
+            builder.Attachments.Add(attachment.FileName, attachment.Data, ContentType.Parse(attachment.ContentType));
+        }
+
         var logo = builder.LinkedResources.Add("joevar-logo.png", Logo, new ContentType("image", "png"));
         logo.ContentId = MimeKit.Utils.MimeUtils.GenerateMessageId();
 
@@ -105,6 +122,9 @@ public sealed class OfficeEmailSender(IOptions<EmailOptions> options, ILogger<Of
 }
 
 /// <summary>Outgoing email to the office (Contact form, kitchen bookings). Password is a Google app password; keep it in user secrets.</summary>
+/// <summary>A file attached to an office email.</summary>
+public sealed record EmailAttachment(string FileName, string ContentType, byte[] Data);
+
 public sealed class EmailOptions
 {
     public const string SectionName = "Email";

@@ -26,6 +26,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
     public DbSet<ContractorApplication> ContractorApplications => Set<ContractorApplication>();
 
+    public DbSet<BathroomRequest> BathroomRequests => Set<BathroomRequest>();
+
     public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -147,6 +149,32 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             booking.HasIndex(b => b.Status);
             booking.HasIndex(b => b.AppointmentDate);
             booking.HasIndex(b => b.CreatedAt);
+        });
+
+        builder.Entity<BathroomRequest>(request =>
+        {
+            request.Property(r => r.Package).HasMaxLength(40);
+            request.Property(r => r.PackageName).HasMaxLength(100);
+            request.Property(r => r.Name).HasMaxLength(200);
+            request.Property(r => r.Email).HasMaxLength(320);
+            request.Property(r => r.Phone).HasMaxLength(20);
+            request.Property(r => r.StreetAddress).HasMaxLength(200);
+            request.Property(r => r.City).HasMaxLength(100);
+            request.Property(r => r.State).HasMaxLength(40);
+            request.Property(r => r.ZipCode).HasMaxLength(10);
+            request.Property(r => r.LengthFeet).HasPrecision(5, 1);
+            request.Property(r => r.WidthFeet).HasPrecision(5, 1);
+            request.Property(r => r.Timeline).HasMaxLength(40);
+            request.Property(r => r.Goals).HasMaxLength(4000);
+            request.HasMany(r => r.Photos).WithOne().HasForeignKey(p => p.BathroomRequestId).OnDelete(DeleteBehavior.Cascade);
+            request.HasIndex(r => r.CreatedAt);
+        });
+
+        builder.Entity<BathroomRequestPhoto>(photo =>
+        {
+            photo.Property(p => p.FileName).HasMaxLength(200);
+            photo.Property(p => p.ContentType).HasMaxLength(20);
+            photo.ToTable("BathroomRequestPhotos");
         });
 
         builder.Entity<ContactMessage>(contact =>
