@@ -92,6 +92,17 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   (`OfficeEmailSender.SendAsync(..., attachments)`, `EmailAttachment`) and a summary to the customer; staff push via
   `StaffAlertInterceptor`. Staff read them with `GET /api/bathroom-requests` (paged, newest first, photo ids and names)
   and `GET /api/bathroom-requests/{id}/photos/{photoId}` (the bytes), in `Bathroom/BathroomRequestStaffEndpoints.cs`.
+- **Payments** (`Payments/`, Stripe.net 53, 2026-11-23): `KitchenPayments` (scoped) does the Stripe work through hosted
+  Checkout: the kitchen visit deposit (`KitchenBooking` + `CustomerId`, `DepositCents`, `StripeCheckoutSessionId`,
+  `StripePaymentIntentId`, `PaidAt`, `RefundedAt`; statuses `AwaitingPayment` and `Expired`), finalized once with a
+  conditional `ExecuteUpdate` (the webhook and the customer's return can race), refunds on decline, and saved cards
+  (Checkout setup mode, `CustomerPaymentMethodService`, detach only the customer's own). `Customer.StripeCustomerId`.
+  `CustomerStage` (seeded: Paid Deposit `key: deposit`, Received Blueprint, Installed Cabinets, Installed Countertop) and
+  `CustomerStageCompletion` (customer + stage, when, by whom; "Stripe" for a paid deposit) drive the staff progress board;
+  `SiteSetting` (key/value) holds `KitchenDepositCents`. `StaffAlertInterceptor` skips `AwaitingPayment` bookings (the
+  alert is sent when paid). Return addresses use the request's `Origin` only when it's in `Cors:AllowedOrigins`.
+  Settings `Stripe:SecretKey`, `Stripe:WebhookSecret` (user secrets; `infra/deploy.sh` copies `Stripe:*`). Contract in
+  joevarWeb's CLAUDE.md ("Payments").
 - `ProjectType` is shared by project types and contractor trades. Enums are stored as text and lists as
   `text[]`.
 
@@ -217,9 +228,10 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   firewall: Azure services only) and Static Web App `joevar-web` (Free), all in Central US (Iowa). North Central US
   (Illinois) was the plan, but this trial subscription has 0 App Service quota there and in the other US regions
   tested (eastus, eastus2, southcentralus, westus2); `az deployment group validate` shows it before creating
-  anything. Resource group `joevar-rg`. The subscription is a Free Trial (quota
-  `FreeTrial_2014-09-01`, spending limit on): $0 while the database is in the free account's 12 months (750 h B1ms +
-  32 GB), then ~$16/month. Upgrade it to Pay-As-You-Go within the trial's 30 days, or Azure disables everything. Subscription "Azure subscription 1" (Azure account
+  anything. Resource group `joevar-rg`. The subscription started as a Free Trial on 2026-10-25; when the trial ended on
+  2026-11-24 Azure disabled it (the site showed Azure's "404: Not found", also on the azurestaticapps.net address, and
+  the API "Web App - Unavailable"/403), and the user upgraded it to **Pay-As-You-Go** the same day, which brought both
+  back with their data. $0 while the database is in the free account's 12 months (750 h B1ms + 32 GB), then ~$16/month. Subscription "Azure subscription 1" (Azure account
   joevar83@outlook.com) has a $50 monthly budget `joevar-monthly` that emails office@joevar.com at 80% of actual
   spend and when the month's forecast passes $50 (created with `az rest`, not in Bicep).
 - Custom domains (2026-10-25): https://joevar.com and https://www.joevar.com on the Static Web App (Namecheap DNS:
