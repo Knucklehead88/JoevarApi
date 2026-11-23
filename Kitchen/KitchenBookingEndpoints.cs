@@ -41,10 +41,12 @@ public static class KitchenBookingEndpoints
         return endpoints;
     }
 
-    private static async Task<Results<NoContent, ValidationProblem>> CreateBookingAsync(
+    private static async Task<Results<Ok<KitchenBookingCheckout>, NoContent, ValidationProblem, ProblemHttpResult>> CreateBookingAsync(
         KitchenBookingRequest request,
+        HttpContext httpContext,
         AppDbContext db,
         UsCityDirectory cities,
+        KitchenPayments payments,
         OfficeEmailSender emailSender,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -93,6 +95,9 @@ public static class KitchenBookingEndpoints
             return TypedResults.ValidationProblem(errors);
         }
 
+        // With a deposit (set in the staff app, and Stripe set up), the booking waits for payment: staff only see it,
+        // and the emails only go out, once Stripe says it's paid (KitchenPayments).
+        var deposit = await payments.DepositCentsAsync(cancellationToken);
         var booking = new KitchenBooking
         {
             Name = request.Name.Trim(),
@@ -105,7 +110,9 @@ public static class KitchenBookingEndpoints
             AppointmentDate = request.Date,
             AppointmentTime = request.Time,
             Selections = request.Selections.Select(selection => $"{selection.Category.Trim()}: {selection.Option.Trim()}").ToList(),
-            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim()
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+            Status = deposit > 0 ? KitchenBookingStatus.AwaitingPayment : KitchenBookingStatus.Pending,
+            DepositCents = deposit > 0 ? deposit : null
         };
         db.KitchenBookings.Add(booking);
         if (request.Push is { } push && push.HasKnownPushService())
@@ -121,19 +128,51 @@ public static class KitchenBookingEndpoints
 
         await db.SaveChangesAsync(cancellationToken);
         var logger = loggerFactory.CreateLogger("KitchenBooking");
-        logger.LogInformation("A kitchen design booking was received.");
 
-        // Saved first, so a mail problem never loses a booking or shows the customer an error.
+        if (deposit > 0)
+        {
+            try
+            {
+                var checkoutUrl = await payments.StartCheckoutAsync(booking, payments.ReturnOrigin(httpContext), cancellationToken);
+                logger.LogInformation("Kitchen booking {Id} is waiting for its deposit.", booking.Id);
+                return TypedResults.Ok(new KitchenBookingCheckout(booking.Id, checkoutUrl, deposit));
+            }
+            catch (Stripe.StripeException exception)
+            {
+                logger.LogError(exception, "Stripe couldn't open the checkout for kitchen booking {Id}.", booking.Id);
+                booking.Status = KitchenBookingStatus.Expired;
+                await db.SaveChangesAsync(cancellationToken);
+                return TypedResults.Problem(
+                    statusCode: StatusCodes.Status502BadGateway,
+                    title: "The payment page couldn't be opened. Please try again.");
+            }
+        }
+
+        logger.LogInformation("A kitchen design booking was received.");
+        await SendReceivedEmailsAsync(booking, emailSender, logger, cancellationToken);
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>
+    /// "New booking" to the office and "we received your request" to the customer: when a booking is saved without a
+    /// deposit, or when its deposit is paid. Mail problems are only logged; the booking stands.
+    /// </summary>
+    public static async Task SendReceivedEmailsAsync(KitchenBooking booking, OfficeEmailSender emailSender, ILogger logger, CancellationToken cancellationToken)
+    {
+        var deposit = booking is { PaidAt: not null, DepositCents: { } cents }
+            ? $"{KitchenPayments.Money(cents)} paid on {booking.PaidAt:MMMM d, yyyy} (Stripe {booking.StripePaymentIntentId})"
+            : null;
         try
         {
             var time = DisplayTime(booking.AppointmentTime);
             var selections = SelectionList(booking, "(none chosen)");
             await emailSender.SendAsync(
-                $"Kitchen design booking: {booking.Name}, {booking.AppointmentDate:ddd MMM d} at {time}",
+                $"Kitchen design booking: {booking.Name}, {booking.AppointmentDate:ddd MMM d} at {time}{(deposit is null ? "" : " (deposit paid)")}",
                 $"""
                 New "Schedule your free blueprint" booking from the Kitchen Design page.
 
                 Visit: {booking.AppointmentDate:dddd, MMMM d, yyyy} at {time}
+                Deposit: {deposit ?? "none"}
 
                 Name:  {booking.Name}
                 Email: {booking.Email}
@@ -146,7 +185,7 @@ public static class KitchenBookingEndpoints
                 Notes:
                 {booking.Notes ?? "-"}
 
-                Approve or decline it in the staff Calendar. Reply to this email to answer {booking.Name}.
+                Approve or decline it in the staff Calendar{(deposit is null ? "" : " (declining refunds the deposit)")}. Reply to this email to answer {booking.Name}.
                 """,
                 booking.Name,
                 booking.Email,
@@ -157,34 +196,41 @@ public static class KitchenBookingEndpoints
             logger.LogError(exception, "Kitchen booking {Id} was saved but could not be emailed.", booking.Id);
         }
 
-        // The customer's copy: what they asked for, and that the office will confirm the visit.
+        // The customer's copy: what they asked for, the deposit they paid, and that the office will confirm the visit.
         try
         {
             await emailSender.SendToCustomerAsync(
                 booking.Name,
                 booking.Email,
-                "We received your kitchen design request",
-                CustomerEmail(booking),
+                deposit is null ? "We received your kitchen design request" : "Your deposit is paid: we received your kitchen design request",
+                CustomerEmail(booking, deposit),
                 cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogError(exception, "Kitchen booking {Id} was saved but the customer's email could not be sent.", booking.Id);
         }
-
-        return TypedResults.NoContent();
     }
 
-    private static string CustomerEmail(KitchenBooking booking)
+    private static string CustomerEmail(KitchenBooking booking, string? deposit)
     {
         var time = DisplayTime(booking.AppointmentTime);
         var selections = SelectionList(booking, "(none chosen yet; we'll go through the options with you at the visit)");
+        var payment = deposit is null
+            ? ""
+            : $"""
+
+              Payment confirmation
+              Deposit: {deposit}
+              If we can't schedule your visit, the deposit is refunded in full.
+
+              """;
         return $"""
             Hi {booking.Name},
 
             Thank you for your kitchen design request. We've received it and will contact you shortly to confirm
             your appointment.
-
+            {payment}
             Requested visit: {booking.AppointmentDate:dddd, MMMM d, yyyy} at {time}
             Address: {booking.AddressLine}
 
@@ -201,6 +247,9 @@ public static class KitchenBookingEndpoints
             """;
     }
 }
+
+/// <summary>A booking waiting for its deposit: send the customer to <see cref="CheckoutUrl"/> (Stripe's page).</summary>
+public sealed record KitchenBookingCheckout(Guid BookingId, string CheckoutUrl, long DepositCents);
 
 public sealed record KitchenBookingRequest
 {

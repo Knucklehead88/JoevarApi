@@ -47,12 +47,38 @@ public sealed class KitchenBooking
     public string? DecidedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>The customer record the booking belongs to (found by email or phone, else created when it's paid for).</summary>
+    public Guid? CustomerId { get; set; }
+
+    /// <summary>The deposit asked for, in cents; null when no deposit was required (then it went straight to Pending).</summary>
+    public long? DepositCents { get; set; }
+
+    /// <summary>The Stripe Checkout session the customer pays in.</summary>
+    public string? StripeCheckoutSessionId { get; set; }
+
+    /// <summary>The Stripe payment, once paid (refunds go against it).</summary>
+    public string? StripePaymentIntentId { get; set; }
+
+    public DateTimeOffset? PaidAt { get; set; }
+
+    /// <summary>When the deposit was refunded (declining a paid booking refunds it).</summary>
+    public DateTimeOffset? RefundedAt { get; set; }
 }
 
-/// <summary>New bookings wait for staff, who approve (confirming the visit) or decline them.</summary>
+/// <summary>
+/// New bookings wait for staff, who approve (confirming the visit) or decline them. With a deposit, a booking is
+/// AwaitingPayment until Stripe says it's paid (then Pending), or Expired.
+/// </summary>
 public enum KitchenBookingStatus
 {
     Pending,
     Approved,
-    Declined
+    Declined,
+
+    /// <summary>Saved, but the deposit isn't paid yet: staff don't see it until it is.</summary>
+    AwaitingPayment,
+
+    /// <summary>The deposit was never paid (the Stripe checkout expired or was abandoned).</summary>
+    Expired
 }

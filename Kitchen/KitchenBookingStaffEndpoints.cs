@@ -42,6 +42,11 @@ public static class KitchenBookingStaffEndpoints
         {
             query = query.Where(booking => booking.Status == status.Value);
         }
+        else
+        {
+            // Unpaid (or never paid) deposit bookings aren't real requests yet; ask for them by status to see them.
+            query = query.Where(booking => booking.Status != KitchenBookingStatus.AwaitingPayment && booking.Status != KitchenBookingStatus.Expired);
+        }
 
         if (from is not null)
         {
@@ -152,6 +157,7 @@ public static class KitchenBookingStaffEndpoints
         Guid id,
         DeclineKitchenBookingRequest request,
         AppDbContext db,
+        KitchenPayments payments,
         OfficeEmailSender emailSender,
         PushQueue pushQueue,
         ClaimsPrincipal principal,
@@ -173,6 +179,24 @@ public static class KitchenBookingStaffEndpoints
         booking.DecidedAt = DateTimeOffset.UtcNow;
         booking.DecidedBy = principal.Identity?.Name;
         await db.SaveChangesAsync(cancellationToken);
+
+        // A paid deposit goes back in full. A Stripe problem doesn't undo the decline: the office refunds it in Stripe.
+        var refunded = false;
+        try
+        {
+            refunded = await payments.RefundAsync(booking, cancellationToken);
+        }
+        catch (Stripe.StripeException exception)
+        {
+            loggerFactory.CreateLogger("KitchenBooking").LogError(
+                exception, "Kitchen booking {Id} was declined but its deposit couldn't be refunded; refund it in Stripe.", booking.Id);
+        }
+
+        var refundNote = refunded && booking.DepositCents is { } cents
+            ? $"Your {KitchenPayments.Money(cents)} deposit has been refunded in full; it should be back on your card within 5–10 business days.{Environment.NewLine}"
+            : booking.PaidAt is not null
+                ? $"Your deposit will be refunded in full; we'll confirm by email.{Environment.NewLine}"
+                : "";
 
         pushQueue.Enqueue(
             new PushAudience.Booking(booking.Id),
@@ -200,7 +224,7 @@ public static class KitchenBookingStaffEndpoints
             Thank you for your kitchen design request. Unfortunately we can't schedule your visit on
             {booking.AppointmentDate:dddd, MMMM d} at {KitchenBookingEndpoints.DisplayTime(booking.AppointmentTime)}.
             {message}
-            Reply to this email and we'll find a time that works, or book another time on our Kitchen Design page.
+            {refundNote}Reply to this email and we'll find a time that works, or book another time on our Kitchen Design page.
 
             Joevar
             """,
@@ -245,7 +269,10 @@ public static class KitchenBookingStaffEndpoints
             booking.Status,
             booking.CreatedAt,
             booking.DecidedAt,
-            booking.DecidedBy);
+            booking.DecidedBy,
+            booking.DepositCents,
+            booking.PaidAt,
+            booking.RefundedAt);
 }
 
 public sealed record KitchenBookingResponse(
@@ -264,7 +291,10 @@ public sealed record KitchenBookingResponse(
     KitchenBookingStatus Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? DecidedAt,
-    string? DecidedBy);
+    string? DecidedBy,
+    long? DepositCents,
+    DateTimeOffset? PaidAt,
+    DateTimeOffset? RefundedAt);
 
 public sealed record ApproveKitchenBookingRequest
 {

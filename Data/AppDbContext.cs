@@ -28,6 +28,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
 
     public DbSet<BathroomRequest> BathroomRequests => Set<BathroomRequest>();
 
+    public DbSet<CustomerStage> CustomerStages => Set<CustomerStage>();
+
+    public DbSet<CustomerStageCompletion> CustomerStageCompletions => Set<CustomerStageCompletion>();
+
+    public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
+
     public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -38,6 +44,36 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
         {
             customer.Property(c => c.Name).HasMaxLength(200);
             customer.Property(c => c.Email).HasMaxLength(320);
+            customer.Property(c => c.StripeCustomerId).HasMaxLength(64);
+        });
+
+        builder.Entity<CustomerStage>(stage =>
+        {
+            stage.Property(s => s.Name).HasMaxLength(100);
+            stage.Property(s => s.Key).HasMaxLength(40);
+            stage.HasIndex(s => s.Key).IsUnique();
+            // The four stages the office started with; more are added in the staff app.
+            stage.HasData(
+                new CustomerStage { Id = new Guid("5a1f0c1e-0001-4000-8000-000000000001"), Name = "Paid Deposit", Position = 0, Key = CustomerStage.DepositKey, CreatedAt = new DateTimeOffset(2026, 11, 23, 0, 0, 0, TimeSpan.Zero) },
+                new CustomerStage { Id = new Guid("5a1f0c1e-0002-4000-8000-000000000002"), Name = "Received Blueprint", Position = 1, CreatedAt = new DateTimeOffset(2026, 11, 23, 0, 0, 0, TimeSpan.Zero) },
+                new CustomerStage { Id = new Guid("5a1f0c1e-0003-4000-8000-000000000003"), Name = "Installed Cabinets", Position = 2, CreatedAt = new DateTimeOffset(2026, 11, 23, 0, 0, 0, TimeSpan.Zero) },
+                new CustomerStage { Id = new Guid("5a1f0c1e-0004-4000-8000-000000000004"), Name = "Installed Countertop", Position = 3, CreatedAt = new DateTimeOffset(2026, 11, 23, 0, 0, 0, TimeSpan.Zero) });
+        });
+
+        builder.Entity<CustomerStageCompletion>(completion =>
+        {
+            completion.HasKey(c => new { c.CustomerId, c.StageId });
+            completion.Property(c => c.CompletedBy).HasMaxLength(256);
+            completion.HasOne<Customer>().WithMany(c => c.StageCompletions).HasForeignKey(c => c.CustomerId).OnDelete(DeleteBehavior.Cascade);
+            completion.HasOne(c => c.Stage).WithMany().HasForeignKey(c => c.StageId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<SiteSetting>(setting =>
+        {
+            setting.HasKey(s => s.Key);
+            setting.Property(s => s.Key).HasMaxLength(100);
+            setting.Property(s => s.Value).HasMaxLength(2000);
+            setting.Property(s => s.UpdatedBy).HasMaxLength(256);
         });
 
         builder.Entity<Project>(project =>
@@ -146,6 +182,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             booking.Property(b => b.Notes).HasMaxLength(4000);
             booking.Property(b => b.Status).HasConversion<string>().HasMaxLength(20);
             booking.Property(b => b.DecidedBy).HasMaxLength(256);
+            booking.Property(b => b.StripeCheckoutSessionId).HasMaxLength(255);
+            booking.Property(b => b.StripePaymentIntentId).HasMaxLength(255);
+            booking.HasOne<Customer>().WithMany().HasForeignKey(b => b.CustomerId).OnDelete(DeleteBehavior.SetNull);
+            booking.HasIndex(b => b.StripeCheckoutSessionId);
             booking.HasIndex(b => b.Status);
             booking.HasIndex(b => b.AppointmentDate);
             booking.HasIndex(b => b.CreatedAt);

@@ -59,6 +59,8 @@ public sealed class StaffAlertInterceptor(PushQueue queue) : SaveChangesIntercep
             .Where(entry => entry.State == EntityState.Added)
             .Select(entry => entry.Entity switch
             {
+                // A booking waiting for its deposit isn't a request yet; KitchenPayments alerts staff once it's paid.
+                KitchenBooking { Status: KitchenBookingStatus.AwaitingPayment } => null,
                 KitchenBooking booking => new PushPayload(
                     "New kitchen design request",
                     $"{booking.Name}: {booking.AppointmentDate:ddd, MMM d} at {KitchenBookingEndpoints.DisplayTime(booking.AppointmentTime)}",

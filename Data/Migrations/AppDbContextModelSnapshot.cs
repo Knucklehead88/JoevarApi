@@ -431,9 +431,95 @@ namespace joevarApi.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("StripeCustomerId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.HasKey("Id");
 
                     b.ToTable("Customers");
+                });
+
+            modelBuilder.Entity("CustomerStage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("CustomerStages");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("5a1f0c1e-0001-4000-8000-000000000001"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Key = "deposit",
+                            Name = "Paid Deposit",
+                            Position = 0
+                        },
+                        new
+                        {
+                            Id = new Guid("5a1f0c1e-0002-4000-8000-000000000002"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Name = "Received Blueprint",
+                            Position = 1
+                        },
+                        new
+                        {
+                            Id = new Guid("5a1f0c1e-0003-4000-8000-000000000003"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Name = "Installed Cabinets",
+                            Position = 2
+                        },
+                        new
+                        {
+                            Id = new Guid("5a1f0c1e-0004-4000-8000-000000000004"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Name = "Installed Countertop",
+                            Position = 3
+                        });
+                });
+
+            modelBuilder.Entity("CustomerStageCompletion", b =>
+                {
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("StageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CompletedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("CustomerId", "StageId");
+
+                    b.HasIndex("StageId");
+
+                    b.ToTable("CustomerStageCompletions");
                 });
 
             modelBuilder.Entity("KitchenBooking", b =>
@@ -458,12 +544,18 @@ namespace joevarApi.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("DecidedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DecidedBy")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
+
+                    b.Property<long?>("DepositCents")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Email")
                         .IsRequired()
@@ -479,10 +571,16 @@ namespace joevarApi.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset?>("RefundedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.PrimitiveCollection<List<string>>("Selections")
                         .IsRequired()
@@ -503,6 +601,14 @@ namespace joevarApi.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("StripeCheckoutSessionId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("StripePaymentIntentId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<string>("ZipCode")
                         .IsRequired()
                         .HasMaxLength(10)
@@ -514,7 +620,11 @@ namespace joevarApi.Data.Migrations
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("CustomerId");
+
                     b.HasIndex("Status");
+
+                    b.HasIndex("StripeCheckoutSessionId");
 
                     b.ToTable("KitchenBookings");
                 });
@@ -918,6 +1028,29 @@ namespace joevarApi.Data.Migrations
                     b.ToTable("ProjectItems");
                 });
 
+            modelBuilder.Entity("SiteSetting", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("SiteSettings");
+                });
+
             modelBuilder.Entity("SmsConsent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1082,6 +1215,31 @@ namespace joevarApi.Data.Migrations
                     b.Navigation("Contractor");
 
                     b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("CustomerStageCompletion", b =>
+                {
+                    b.HasOne("Customer", null)
+                        .WithMany("StageCompletions")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CustomerStage", "Stage")
+                        .WithMany()
+                        .HasForeignKey("StageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Stage");
+                });
+
+            modelBuilder.Entity("KitchenBooking", b =>
+                {
+                    b.HasOne("Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Message", b =>
@@ -1291,6 +1449,8 @@ namespace joevarApi.Data.Migrations
                     b.Navigation("Phone");
 
                     b.Navigation("Projects");
+
+                    b.Navigation("StageCompletions");
                 });
 
             modelBuilder.Entity("Project", b =>

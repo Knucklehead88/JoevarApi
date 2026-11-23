@@ -14,6 +14,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
 builder.Services.Configure<TwilioOptions>(builder.Configuration.GetSection(TwilioOptions.SectionName));
+builder.Services.Configure<StripeOptions>(builder.Configuration.GetSection(StripeOptions.SectionName));
 builder.Services.Configure<MondayOptions>(builder.Configuration.GetSection(MondayOptions.SectionName));
 builder.Services.Configure<AppleOptions>(builder.Configuration.GetSection(AppleOptions.SectionName));
 builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
@@ -29,6 +30,7 @@ builder.Services.AddSingleton<MicrosoftTokenValidator>();
 builder.Services.AddHttpClient<UsCityDirectory>();
 builder.Services.AddScoped<SmsSender>();
 builder.Services.AddScoped<ProjectFeed>();
+builder.Services.AddScoped<KitchenPayments>();
 
 builder.Services.Configure<PushOptions>(builder.Configuration.GetSection(PushOptions.SectionName));
 builder.Services.AddSingleton<PushQueue>();
@@ -143,6 +145,8 @@ app.MapContactEndpoints();
 app.MapKitchenBookingEndpoints();
 app.MapBathroomRequestEndpoints();
 app.MapBathroomRequestStaffEndpoints();
+app.MapPaymentEndpoints();
+app.MapCustomerProgressEndpoints();
 app.MapKitchenBookingStaffEndpoints();
 app.MapVisitorPresenceEndpoints();
 app.MapPushEndpoints();
