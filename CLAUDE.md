@@ -108,24 +108,21 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 
 ## Auth
 
-- **Staff** (roles Admin, Manager, VA): username + password via Identity's `/api/auth/login`, plus an
-  authenticator app (Microsoft Authenticator). The `Staff` policy requires the role **and** the
-  `two_factor_enabled` claim, added by `AppUserClaimsPrincipalFactory` so it survives token refresh. The `Admin`
-  policy is the same with the Admin role only.
+- **Staff** (roles Admin, Manager, VA, Crew): username + password via Identity's `/api/auth/login`, nothing else since
+  2026-11-24 (the user had the Microsoft Authenticator removed: `AuthenticatorEndpoints` and the reset endpoint are gone,
+  and the migration `RemoveStaffAuthenticator` turned two-factor off for everyone, deleted the stored keys and recovery
+  codes, and lifted lockouts). The policies only check roles: `Staff` (office roles), `ProjectTeam` (every staff role),
+  `Admin`. Identity's lockout (5 wrong passwords, 5 minutes) stays. `AppUserClaimsPrincipalFactory` still adds the
+  `two_factor_enabled` claim when a login has two-factor on, which none do now.
 - **Push topics:** `PushSender` sends `Topic` as a 32-character SHA-256 hash of the tag: RFC 8030 caps it at 32
   URL-safe characters and push services reject longer ones (project tags `project-{guid}` were 44).
 - **Crew** (role added 2026-11-05, migration `AddCustomerProjects` seeds it): a staff role (in `StaffAccounts.Roles`:
-  username + password + authenticator, blockable, excluded from `/api/users`) but not office (`StaffAccounts.OfficeRoles`
-  = Admin, Manager, VA, which the `Staff` policy and office push alerts use). The `ProjectTeam` policy (every staff role +
-  2FA) covers the customer project endpoints; Crew only see projects they own, contribute to or are assigned on
+  username + password, blockable, excluded from `/api/users`) but not office (`StaffAccounts.OfficeRoles`
+  = Admin, Manager, VA, which the `Staff` policy and office push alerts use). The `ProjectTeam` policy (every staff role) covers the customer project endpoints; Crew only see projects they own, contribute to or are assigned on
   (`Projects/ProjectAccess.cs`).
 - **Staff management** (`Users/StaffEndpoints.cs`, `/api/staff`, Admin policy): list, add (username, display name,
-  optional email, role (incl. Crew), optional phone + `smsConsent`, first password; they set up the authenticator at
-  first sign-in), `PUT /{id}/phone` `{ phone?, smsConsent }` (stored in `AppUser.PhoneNumber`, unconfirmed; it isn't a
-  sign-in method: phone login only matches customer/contractor `ContactPhones`), block, unblock, delete, and
-  `POST /{id}/reset-authenticator` (two-factor off, `ResetAuthenticatorKeyAsync` (new key and security stamp, so
-  refresh tokens fail), `GenerateNewTwoFactorRecoveryCodesAsync(user, 0)` so the old codes stop working and setup
-  issues new ones, lockout lifted unless blocked; not on yourself, 409).
+  optional email, role (incl. Crew), optional phone + `smsConsent`, first password, which they sign in with), `PUT /{id}/phone` `{ phone?, smsConsent }` (stored in `AppUser.PhoneNumber`, unconfirmed; it isn't a
+  sign-in method: phone login only matches customer/contractor `ContactPhones`), block, unblock, delete.
   Nobody can block/delete themselves or the last unblocked Admin (409 with the reason). **Blocking**
   (`Users/StaffAccounts.cs`): lockout until `BlockedUntil` (9999-01-01; `DateTimeOffset.MaxValue` isn't stored as is
   by PostgreSQL), a new security stamp (refresh tokens fail), and `UseBlockedLoginCheck` (between authentication and
@@ -144,7 +141,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
     profile; Identity's default password rules; an email already on any login/customer/contractor is a 400 field
     error) and signs in. `POST /api/auth/password/login` `{ email, password }` signs in the one login with that email
     and a password (Identity's lockout applies); staff accounts get 401 `RequiresTwoFactor` (they use `/api/auth/login`
-    with their username + authenticator). The email isn't verified: it's saved unconfirmed on the login only, **not**
+    with their username). The email isn't verified: it's saved unconfirmed on the login only, **not**
     on the customer.
   - **Google** (`Auth/GoogleLogin.cs`, `POST /api/auth/google` `{ accessToken }` from the frontend's GIS token
     client, `Google:ClientId`). `GoogleTokenValidator` (typed HttpClient) checks it with Google: `tokeninfo` must
@@ -275,7 +272,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
   .NET's own crypto, not the old Portable.BouncyCastle): VAPID keys in `Push:PublicKey`/`Push:PrivateKey`/`Push:Subject`
   (user secrets; App Service settings via `infra/deploy.sh`; generated 2026-10-29, push is off without them).
   `WebPushSubscription` rows belong to a user (`UserId`) or a kitchen booking (`KitchenBookingId`), cascade-deleted with
-  them. Staff alerts go only to users with a staff role and 2FA on; a booking's decision goes to its own device and to logins that proved
+  them. Staff alerts go only to unblocked users with an office role; a booking's decision goes to its own device and to logins that proved
   its phone or email (`PhoneNumberConfirmed`/`EmailConfirmed`), never on an unproven match. A device on file twice gets one notification. `GET /api/push/public-key` (anyone),
   `PUT`/`DELETE /api/push/subscription` (any signed-in user; delete also removes that device's booking subscriptions), and `push` on `KitchenBookingRequest`. Endpoints must be https
   on fcm.googleapis.com, push.services.mozilla.com, push.apple.com or notify.windows.com (no posting to arbitrary
@@ -290,8 +287,7 @@ On Linux (Ubuntu, folder `~/Projects/JoevarApi`) the SDK is Ubuntu's `dotnet-sdk
 - Gotcha: `dotnet ef migrations add` gives a new non-null string column (like `KitchenBookings.Status`) a default of
   `""`, which breaks reading existing rows as an enum; set the migration's `defaultValue` (here `"Pending"`).
 - A staff endpoint to list Contact form messages (they're emailed and saved, but not readable in the app).
-- Changing a staff member's role or resetting their password (for now: delete and add again; the authenticator has
-  its own reset, see Staff management above);
+- Changing a staff member's role or resetting their password (for now: delete and add again);
   customer/contractor portal endpoints.
 - Sync between the database and monday.com (the database becomes the system of record).
 - Apple sign-in doesn't check a nonce yet. Changing a customer's phone doesn't revoke existing

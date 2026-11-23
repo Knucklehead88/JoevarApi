@@ -47,8 +47,7 @@ public static class CurrentUserEndpoints
 }
 
 /// <summary>
-/// Who is signed in. Staff with <see cref="IsTwoFactorEnabled"/> false must set up the authenticator app
-/// before staff endpoints will answer.
+/// Who is signed in. (<see cref="IsTwoFactorEnabled"/> is false for everyone: staff sign-in dropped the authenticator.)
 /// </summary>
 public sealed record CurrentUserResponse(
     string Id,

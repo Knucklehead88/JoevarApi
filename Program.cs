@@ -42,18 +42,13 @@ builder.Services.AddDbContext<AppDbContext>((services, options) => options
     .UseNpgsql(builder.Configuration.GetConnectionString("Default"))
     .AddInterceptors(services.GetRequiredService<StaffAlertInterceptor>()));
 
-// Staff must have an authenticator app enabled; customers and contractors sign in by phone code, password, passkey,
-// Apple, Google or Microsoft.
+// Staff sign in with their username and password (no authenticator since 2026-11-24, at the user's request; the
+// lockout after 5 wrong passwords stays); customers and contractors by phone code, password, passkey, Apple, Google
+// or Microsoft.
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy(AuthPolicies.Staff, policy => policy
-        .RequireRole(StaffAccounts.OfficeRoles)
-        .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"))
-    .AddPolicy(AuthPolicies.ProjectTeam, policy => policy
-        .RequireRole(StaffAccounts.Roles)
-        .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"))
-    .AddPolicy(AuthPolicies.Admin, policy => policy
-        .RequireRole(AppRoles.Admin)
-        .RequireClaim(AppUserClaimsPrincipalFactory.TwoFactorEnabledClaim, "true"));
+    .AddPolicy(AuthPolicies.Staff, policy => policy.RequireRole(StaffAccounts.OfficeRoles))
+    .AddPolicy(AuthPolicies.ProjectTeam, policy => policy.RequireRole(StaffAccounts.Roles))
+    .AddPolicy(AuthPolicies.Admin, policy => policy.RequireRole(AppRoles.Admin));
 
 // Bearer-token login endpoints for the Vue frontend (login, refresh, 2FA, ...).
 builder.Services.AddIdentityApiEndpoints<AppUser>(options => options.Stores.SchemaVersion = IdentitySchemaVersions.Version3)
@@ -134,7 +129,6 @@ app.MapAppleLoginEndpoints();
 app.MapGoogleLoginEndpoints();
 app.MapMicrosoftLoginEndpoints();
 app.MapPasswordSignupEndpoints();
-app.MapAuthenticatorEndpoints();
 app.MapCurrentUserEndpoints();
 app.MapCustomerEndpoints();
 app.MapProjectEndpoints();

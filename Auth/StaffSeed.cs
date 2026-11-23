@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Identity;
 /// On startup, creates Joevar's staff logins (Admins) that don't exist yet, all with the password in the
 /// <c>Seed:StaffPassword</c> setting (a user secret locally, an App Service setting in Azure; never in the repo).
 /// Nothing happens while it isn't set: in Azure, set it once, restart, then remove it. Existing users are left alone, so
-/// a changed password isn't reset. Each still sets up the authenticator app at first sign-in.
+/// a changed password isn't reset.
 /// </summary>
 public static class StaffSeed
 {

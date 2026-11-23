@@ -32,7 +32,7 @@ public abstract record PushAudience
 
     public sealed record Booking(Guid KitchenBookingId) : PushAudience;
 
-    /// <summary>These staff logins' devices (a project's team), when not blocked and with the authenticator on.</summary>
+    /// <summary>These staff logins' devices (a project's team), when not blocked.</summary>
     public sealed record Users(IReadOnlyCollection<string> UserIds) : PushAudience;
 }
 
@@ -159,7 +159,7 @@ public sealed class PushSender(
                 .ToListAsync(cancellationToken);
         }
 
-        // Only staff with the authenticator on and not blocked, like the staff pages: customers and contractors can also
+        // Only staff who aren't blocked, like the staff pages: customers and contractors can also
         // have devices on file. Office alerts (bookings, registrations) skip Crew.
         var staffRoles = audience is PushAudience.Users ? StaffAccounts.Roles : StaffAccounts.OfficeRoles;
         var staff = from userRole in db.UserRoles
@@ -174,7 +174,7 @@ public sealed class PushSender(
 
         return await db.WebPushSubscriptions
             .Where(subscription => subscription.UserId != null && staff.Contains(subscription.UserId)
-                && db.Users.Any(user => user.Id == subscription.UserId && user.TwoFactorEnabled
+                && db.Users.Any(user => user.Id == subscription.UserId
                     && (user.LockoutEnd == null || user.LockoutEnd < StaffAccounts.BlockedUntil)))
             .ToListAsync(cancellationToken);
     }

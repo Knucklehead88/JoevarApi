@@ -124,7 +124,7 @@ public sealed partial class ProjectFeed(AppDbContext db, PushQueue push, SmsSend
                        where StaffAccounts.Roles.Contains(role.Name!)
                        select userRole.UserId;
         var member = await db.Users
-            .Where(user => user.PhoneNumber == from && staffIds.Contains(user.Id) && user.TwoFactorEnabled
+            .Where(user => user.PhoneNumber == from && staffIds.Contains(user.Id)
                 && (user.LockoutEnd == null || user.LockoutEnd < StaffAccounts.BlockedUntil))
             .FirstOrDefaultAsync(cancellationToken);
         if (member is not null)

@@ -93,7 +93,7 @@ public static class PasswordSignupEndpoints
             return Failed("Failed");
         }
 
-        // Staff sign in with their username and the authenticator code, on their own page.
+        // Staff sign in with their username, on their own page.
         var user = users[0];
         var roles = await userManager.GetRolesAsync(user);
         if (roles.Any(StaffAccounts.Roles.Contains))

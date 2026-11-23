@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 /// </summary>
 public static class StaffAccounts
 {
-    /// <summary>Every staff role, highest first. They all sign in with a username, password and authenticator.</summary>
+    /// <summary>Every staff role, highest first. They all sign in with a username and password.</summary>
     public static readonly string[] Roles = [AppRoles.Admin, AppRoles.Manager, AppRoles.VirtualAssistant, AppRoles.Crew];
 
     /// <summary>The office: staff who use every staff page. Crew only get the customer projects they're on.</summary>

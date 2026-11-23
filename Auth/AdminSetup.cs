@@ -27,7 +27,7 @@ public static class AdminSetup
             return 1;
         }
 
-        Console.WriteLine($"Admin '{userName}' created. Sign in, then set up the authenticator app to reach staff endpoints.");
+        Console.WriteLine($"Admin '{userName}' created. Sign in at /staff/login with this username and password.");
         return 0;
     }
 }
